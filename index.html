@@ -1,0 +1,1284 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>유류대 대조표 생성기</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=IBM+Plex+Sans+KR:wght@400;500;700&display=swap">
+<style>
+:root{
+  --ground:#EDEFEA; --surface:#FAFBF8; --sunk:#E3E7E1; --ink:#1B2320; --muted:#59645F; --line:#D2D8D1;
+  --accent:#E3A20B; --accent-ink:#7A5300; --accent-soft:#F7E7BD; --steel:#3D5E6E;
+  --bad:#B23E16; --bad-bg:#F6DFD5; --warn:#8D6100; --warn-bg:#F4EACB; --info:#2D6284; --info-bg:#DCE8F0; --ok:#2C7A4E;
+  --s1:#D9960A; --s2:#3D6F87; --s3:#3E8A5B; --s4:#8C5A9E; --s5:#B5532B;
+  --radius:10px;
+  --sans:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ground:#121614; --surface:#1A1F1D; --sunk:#232A27; --ink:#E5E9E6; --muted:#98A39D; --line:#2F3834;
+    --accent:#F0B429; --accent-ink:#F5C85A; --accent-soft:#3A2F12; --steel:#8FB3C4;
+    --bad:#F28B67; --bad-bg:#3B221A; --warn:#E6B64C; --warn-bg:#342A10; --info:#86B9DC; --info-bg:#16293A; --ok:#6CC592;
+    --s1:#F0B429; --s2:#7FB0C9; --s3:#6CC592; --s4:#C49AD6; --s5:#E98A5F;
+  }
+}
+:root[data-theme="dark"]{
+  --ground:#121614; --surface:#1A1F1D; --sunk:#232A27; --ink:#E5E9E6; --muted:#98A39D; --line:#2F3834;
+  --accent:#F0B429; --accent-ink:#F5C85A; --accent-soft:#3A2F12; --steel:#8FB3C4;
+  --bad:#F28B67; --bad-bg:#3B221A; --warn:#E6B64C; --warn-bg:#342A10; --info:#86B9DC; --info-bg:#16293A; --ok:#6CC592;
+  --s1:#F0B429; --s2:#7FB0C9; --s3:#6CC592; --s4:#C49AD6; --s5:#E98A5F;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--ground);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.55;padding-inline:16px;padding-block:28px 64px}
+.wrap{max-width:1180px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+h1,h2,h3{margin:0;text-wrap:balance;line-height:1.25}
+h1{font-size:clamp(24px,3.2vw,32px);font-weight:700;letter-spacing:-.01em}
+h2{font-size:18px;font-weight:700}
+p{margin:0}
+.num,td.n,.tile b{font-family:var(--mono);font-variant-numeric:tabular-nums}
+button,input,select{font:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* header */
+.top{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:12px 24px}
+.top .lede{color:var(--muted);max-width:62ch;margin-top:6px}
+.eyebrow{font-size:12px;letter-spacing:.08em;color:var(--accent-ink);font-weight:700}
+.lock{display:inline-flex;align-items:center;gap:8px;font-size:13px;color:var(--muted);background:var(--surface);border:1px solid var(--line);border-radius:999px;padding:6px 12px}
+.lock i{width:8px;height:8px;border-radius:50%;background:var(--ok);display:inline-block}
+
+/* upload */
+.drop{position:relative;background:var(--surface);border:1.5px dashed var(--line);border-radius:var(--radius);padding:22px 20px 20px;display:flex;flex-wrap:wrap;gap:14px 20px;align-items:center;justify-content:space-between;overflow:hidden}
+.drop::before{content:"";position:absolute;inset:0 0 auto 0;height:6px;background:repeating-linear-gradient(-45deg,var(--accent) 0 12px,var(--ink) 12px 24px);opacity:.85}
+.drop.over{border-color:var(--accent);background:var(--accent-soft)}
+.drop .what{display:flex;flex-direction:column;gap:4px;min-width:0}
+.drop .what strong{font-size:16px}
+.drop .what span{color:var(--muted);font-size:13px}
+.actions{display:flex;flex-wrap:wrap;gap:8px}
+.btn{border:1px solid var(--line);background:var(--surface);border-radius:8px;padding:9px 14px;cursor:pointer;font-weight:500;white-space:nowrap}
+.btn:hover{border-color:var(--ink)}
+.btn.primary{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.btn.primary:hover{opacity:.9}
+.btn:disabled{opacity:.5;cursor:default}
+.files{display:flex;flex-wrap:wrap;gap:6px;width:100%}
+.files:empty{display:none}
+.chip{border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:13px;background:var(--ground);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--ink);color:var(--surface);border-color:var(--ink)}
+.notice{font-size:13px;padding:10px 14px;border-radius:8px;background:var(--info-bg);color:var(--info)}
+.notice.err{background:var(--bad-bg);color:var(--bad)}
+
+/* summary */
+.site{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:8px 16px}
+.site p{color:var(--muted);font-size:13px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:12px}
+.tile{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px;display:flex;flex-direction:column;gap:4px}
+.tile .k{font-size:12px;color:var(--muted);letter-spacing:.04em}
+.tile b{font-size:22px;font-weight:500}
+.tile .s{font-size:13px;color:var(--muted)}
+.counts{display:flex;flex-wrap:wrap;gap:6px;margin-top:2px}
+
+.pill{display:inline-flex;align-items:center;gap:4px;border-radius:999px;padding:2px 9px;font-size:12px;font-weight:700;white-space:nowrap}
+.p-bad{background:var(--bad-bg);color:var(--bad)}
+.p-warn{background:var(--warn-bg);color:var(--warn)}
+.p-info{background:var(--info-bg);color:var(--info)}
+.p-mute{background:var(--sunk);color:var(--muted)}
+
+/* tabs */
+.tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto}
+.tab{border:0;background:none;padding:10px 14px;cursor:pointer;color:var(--muted);font-weight:500;border-bottom:3px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.tab[aria-selected="true"]{color:var(--ink);border-bottom-color:var(--accent)}
+.tab .c{font-family:var(--mono);font-size:12px;margin-left:4px}
+.panel{display:flex;flex-direction:column;gap:16px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px}
+.card-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:10px;margin-bottom:12px}
+.card-head p{color:var(--muted);font-size:13px}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.seg button{border:0;background:none;padding:6px 12px;cursor:pointer;font-size:13px}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--surface)}
+
+/* tables */
+.scroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th{font-weight:500;color:var(--muted);text-align:left;font-size:12px;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:middle}
+td.n,th.n{text-align:right;white-space:nowrap}
+tr.grp td{background:var(--sunk);font-weight:700;font-size:13px}
+tr.avg td{font-weight:700}
+.dev{display:inline-block;min-width:54px;text-align:right;font-family:var(--mono);font-size:12px}
+.dev.up{color:var(--bad)} .dev.dn{color:var(--info)}
+.bar{position:relative;height:8px;width:110px;background:var(--sunk);border-radius:4px;display:inline-block;vertical-align:middle}
+.bar i{position:absolute;inset:0 auto 0 0;border-radius:4px;background:var(--accent)}
+.bar em{position:absolute;top:-3px;bottom:-3px;width:2px;background:var(--ink);left:50%}
+.tag{font-size:12px;color:var(--accent-ink);background:var(--accent-soft);border-radius:4px;padding:1px 6px;margin-right:4px;white-space:nowrap}
+.muted{color:var(--muted)}
+.filters{display:flex;flex-wrap:wrap;gap:6px}
+
+/* issues */
+.issues{display:flex;flex-direction:column;gap:8px}
+.issue{display:grid;grid-template-columns:6px 1fr;background:var(--surface);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.issue::before{content:"";background:var(--c,var(--muted))}
+.issue.error{--c:var(--bad)} .issue.warn{--c:var(--warn)} .issue.info{--c:var(--info)}
+.issue > div{padding:10px 14px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.issue .meta{display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;font-size:12px;color:var(--muted)}
+.issue .meta code{font-family:var(--mono);background:var(--sunk);padding:1px 6px;border-radius:4px;color:var(--ink);overflow-wrap:anywhere}
+.issue strong{font-weight:700;overflow-wrap:anywhere}
+.issue p{font-size:13.5px;color:var(--muted);overflow-wrap:anywhere}
+
+/* chart */
+.chart svg{width:100%;height:auto;display:block}
+.chart text{fill:var(--muted);font-family:var(--sans);font-size:12px}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:13px;margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:3px;border-radius:2px;display:inline-block}
+.two{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:16px}
+@media (max-width:860px){.two{grid-template-columns:1fr}}
+.foot{color:var(--muted);font-size:12.5px;max-width:80ch}
+.foot li{margin-block:2px}
+@media (prefers-reduced-motion: reduce){*{transition:none!important}}
+</style>
+<style>
+:root{ --s6:#1F8A8A; --s7:#7A7F2A; --s8:#A0456E; }
+@media (prefers-color-scheme: dark){ :root:not([data-theme="light"]){ --s6:#5CC8C8; --s7:#C3C86A; --s8:#E08AB3; } }
+:root[data-theme="dark"]{ --s6:#5CC8C8; --s7:#C3C86A; --s8:#E08AB3; }
+.steps{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;align-items:start}
+.step{background:var(--surface);border:1px solid var(--line);border-radius:var(--radius);padding:18px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.step h2{font-size:16px;display:flex;align-items:center;gap:10px}
+.step h2 b{display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--ink);color:var(--surface);font-size:13px;font-family:var(--mono)}
+.step p.help{color:var(--muted);font-size:13px}
+.drop{flex-direction:column;align-items:stretch;padding:22px 16px 16px}
+.drop .actions{justify-content:flex-start}
+.flist{display:flex;flex-direction:column;gap:6px}
+.frow{display:flex;align-items:center;gap:8px;font-size:13px;background:var(--ground);border:1px solid var(--line);border-radius:8px;padding:6px 8px 6px 12px;min-width:0}
+.frow > span:first-child{flex:1;min-width:0;overflow-wrap:anywhere}
+.frow button{border:0;background:none;cursor:pointer;color:var(--muted);font-size:16px;line-height:1;padding:2px 6px}
+.sheets{font-size:12.5px;color:var(--muted);display:flex;flex-wrap:wrap;gap:4px 6px}
+.field{display:flex;flex-direction:column;gap:4px;font-size:13px}
+.field input[type=text],.field select{border:1px solid var(--line);border-radius:6px;padding:7px 9px;background:var(--surface);width:100%}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:13px}
+.check input{margin-top:3px;accent-color:var(--ink)}
+.alias{display:flex;flex-direction:column;gap:8px}
+.alias .row{display:grid;grid-template-columns:1fr;gap:4px;background:var(--bad-bg);border-radius:8px;padding:8px 10px;font-size:13px}
+.alias .row strong{color:var(--bad)}
+.big{font-size:15px;padding:12px 16px;width:100%}
+.outlist{font-size:13px;color:var(--muted);margin:0;padding-left:18px}
+.outlist li{margin-block:2px}
+.charts{display:grid;grid-template-columns:repeat(auto-fit,minmax(420px,1fr));gap:14px}
+@media (max-width:520px){.charts{grid-template-columns:1fr}}
+.chart svg{width:100%;height:auto;display:block}
+.chart text{fill:var(--muted);font-family:var(--sans);font-size:12px}
+.chart .grid{stroke:var(--line);stroke-width:1}
+.legend{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12.5px;margin-top:8px}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:16px;height:0;border-top:3px solid;display:inline-block}
+.legend i.dash{border-top-style:dashed}
+.mini{font-size:12.5px}
+.mini td,.mini th{padding:5px 8px}
+details.daily summary{cursor:pointer;font-weight:500;padding:4px 0}
+.daily table td,.daily table th{padding:4px 7px;font-size:12px}
+td.other{color:var(--accent-ink)}
+.empty{padding:28px;text-align:center;color:var(--muted)}
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <header class="top">
+    <div>
+      <div class="eyebrow">장비작업일보 + 경유사용집계표 → 유류대 및 장비비 대조표</div>
+      <h1>유류대 대조표 생성기</h1>
+      <p class="lede">원자료 엑셀 두 가지를 올리면 월별 대조표, 장비별 평균(월별 유류사용량·시간당 사용량), 그래프가 들어간 엑셀을 만들어 줍니다.</p>
+      <p class="lede"><a href="checker.html" style="color:var(--accent-ink)">완성된 정리 파일 점검하기 (유류대 점검기) →</a></p>
+    </div>
+    <span class="lock"><i></i>파일은 이 브라우저 안에서만 읽고 어디에도 보내지 않습니다</span>
+  </header>
+
+  <div class="steps">
+    <section class="step" aria-labelledby="h-s1">
+      <h2 id="h-s1"><b>1</b>원자료 올리기</h2>
+      <div class="drop" id="drop">
+        <div class="what">
+          <strong>엑셀을 여기에 끌어다 놓으세요</strong>
+          <span>장비작업일보와 경유사용집계표 (.xlsx). 달마다 따로 된 파일이든 한 파일에 여러 시트든 괜찮습니다. 여러 번 올리면 계속 추가됩니다.</span>
+        </div>
+        <div class="actions">
+          <label class="btn primary" for="file">파일 선택</label>
+          <input id="file" type="file" accept=".xlsx,.xlsm" multiple hidden>
+          <button class="btn" type="button" id="sampleBtn">예시 자료로 보기</button>
+        </div>
+      </div>
+      <div class="flist" id="flist"></div>
+      <div class="sheets" id="sheets"></div>
+    </section>
+
+    <section class="step" aria-labelledby="h-s2">
+      <h2 id="h-s2"><b>2</b>확인·설정</h2>
+      <label class="field" for="site">현장명 (엑셀 제목에 들어감)
+        <input type="text" id="site" placeholder="원자료의 현장명을 자동으로 넣습니다">
+      </label>
+      <label class="check" for="merge"><input type="checkbox" id="merge" checked>
+        <span>작업일보·경유대장에 함께 적힌 이전 달 기록(예: "4월분")을 그 시트의 달에 합치기<br><span class="muted">끄면 실제 날짜의 달로 나눕니다.</span></span>
+      </label>
+      <div class="alias" id="alias"></div>
+    </section>
+
+    <section class="step" aria-labelledby="h-s3">
+      <h2 id="h-s3"><b>3</b>대조표 엑셀 받기</h2>
+      <ul class="outlist" id="outlist"><li>원자료를 올리면 만들 시트가 여기에 표시됩니다.</li></ul>
+      <button class="btn primary big" type="button" id="exportBtn" disabled>대조표 엑셀 만들기</button>
+      <p class="help" id="exportHelp">수식이 살아 있는 엑셀로 만듭니다. 그래프는 "장비별 평균" 시트에 들어갑니다.</p>
+    </section>
+  </div>
+
+  <div id="msg" class="notice" hidden></div>
+
+  <main id="result" class="wrap" style="gap:18px;width:100%" hidden>
+    <div class="site">
+      <div><h2 id="siteName"></h2><p id="siteMeta"></p></div>
+      <div class="seg" role="group" aria-label="단위">
+        <button type="button" id="uL" aria-pressed="true">L/h</button>
+        <button type="button" id="uW" aria-pressed="false">원/h</button>
+      </div>
+    </div>
+    <div class="tiles" id="tiles"></div>
+
+    <nav class="tabs" role="tablist" aria-label="미리보기">
+      <button class="tab" role="tab" id="t-avg" aria-controls="v-avg" aria-selected="true">장비별 평균</button>
+      <button class="tab" role="tab" id="t-month" aria-controls="v-month" aria-selected="false">월별 대조표</button>
+      <button class="tab" role="tab" id="t-bill" aria-controls="v-bill" aria-selected="false">작업일보 청구 대조</button>
+      <button class="tab" role="tab" id="t-check" aria-controls="v-check" aria-selected="false">점검 결과<span class="c" id="cCheck"></span></button>
+    </nav>
+
+    <section class="panel" id="v-avg" role="tabpanel" aria-labelledby="t-avg">
+      <div class="charts" id="charts"></div>
+    </section>
+
+    <section class="panel" id="v-month" role="tabpanel" aria-labelledby="t-month" hidden>
+      <div class="filters" id="monthChips" role="group" aria-label="달 선택"></div>
+      <div class="card">
+        <div class="card-head"><div><h3 id="monthTitle"></h3><p>사용시간·단가는 작업일보, 유류는 경유사용집계표 기준. 장비사용금액 = 시간 × 시간당 단가.</p></div></div>
+        <div class="scroll"><table id="monthTable"></table></div>
+        <details class="daily" id="dailyBox"><summary>일자별 보기</summary><div class="scroll"><table id="dailyTable"></table></div></details>
+      </div>
+    </section>
+
+    <section class="panel" id="v-bill" role="tabpanel" aria-labelledby="t-bill" hidden>
+      <div class="card">
+        <div class="card-head"><div><h3>작업일보 청구금액 대조</h3><p>고정 가산금 = 작업일보 금액 − 시간×단가. 대조표 장비사용금액에는 넣지 않습니다.</p></div></div>
+        <div class="scroll"><table id="billTable"></table></div>
+      </div>
+    </section>
+
+    <section class="panel" id="v-check" role="tabpanel" aria-labelledby="t-check" hidden>
+      <div class="card">
+        <div class="card-head">
+          <div><h3>주유 구간 점검</h3><p>직전 주유 다음날부터 주유일까지 작업시간 대비 주유량. 기종 평균의 150% 초과 = 과다, 60% 미만 = 과소.</p></div>
+          <div class="filters" id="fillFilter" role="group" aria-label="판정 거르기"></div>
+        </div>
+        <div class="scroll"><table id="fillTable"></table></div>
+      </div>
+      <div class="filters" id="issueFilter" role="group" aria-label="심각도 거르기"></div>
+      <div class="issues" id="issueList"></div>
+    </section>
+  </main>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
+<script>
+/* 유류대 및 장비비 대조표 생성기 — 작업일보 + 경유사용집계표 → 대조표·장비별 평균·그래프
+   브라우저(window.FuelGen)와 Node(module.exports) 공용. 입력은 SheetJS 워크북, 출력은 ExcelJS+JSZip. */
+(function (root) {
+  'use strict';
+
+  const EQUIP_RE = /(LC|W\b|W$|굴삭|도저|도져|불도|로더|^\s*\d{3}\s*$)/i;
+  const NON_EQUIP_RE = /(살수|급수|로라|발전|콤|오거|양수|차수|앵커|전용|지게|카고|크레인|펌프|덤프|25T|15T)/i;
+
+  const txt = (v) => (v === undefined || v === null ? '' : String(v));
+  const squash = (v) => txt(v).replace(/\s+/g, '');
+  const round = (x, d = 1) => Math.round(x * 10 ** d) / 10 ** d;
+  const pad2 = (n) => String(n).padStart(2, '0');
+
+  function normType(t) {
+    let s = txt(t).replace(/\s+/g, ' ').trim();
+    if (!s) return '';
+    s = s.replace(/굴삭기|B\/H|BH|백호/gi, '').trim();
+    if (/도져|도저/.test(s)) return /\d/.test(s) ? s.replace(/불?도져/, '도저') : '불도저';
+    s = s.replace(/\s+/g, '');
+    s = s.replace(/^0\.(\d)(W|LC)$/i, '0$1$2');
+    if (/^\d{3}$/.test(s)) s += 'LC';
+    return s.toUpperCase().replace('LC', 'LC');
+  }
+  const isEquip = (type, company) => EQUIP_RE.test(txt(type)) && !NON_EQUIP_RE.test(`${txt(type)} ${txt(company)}`);
+
+  // ------------------------------------------------------------------ 입력 읽기
+  function readInputs(XLSX, books, opts = {}) {
+    const U = XLSX.utils;
+    const fuel = [], diary = [], sheetsUsed = [], issues = [];
+    let site = '';
+    const issue = (level, where, title, detail) => issues.push({ level, where, title, detail });
+
+    for (const { wb, fileName } of books) {
+      for (const name of wb.SheetNames) {
+        const ws = wb.Sheets[name];
+        if (!ws['!ref']) continue;
+        const R = U.decode_range(ws['!ref']);
+        const cell = (r, c) => ws[U.encode_cell({ r, c })];
+        const val = (r, c) => { const x = cell(r, c); return x ? x.v : undefined; };
+        const num = (r, c) => { const x = cell(r, c); return x && typeof x.v === 'number' && isFinite(x.v) ? x.v : 0; };
+
+        // 시트의 연·월
+        const sheetMonth = (() => {
+          let m = name.match(/(?:\d{2}\.)?\s*(\d{1,2})\s*월/);
+          if (m && +m[1] >= 1 && +m[1] <= 12) return +m[1];
+          const a1 = val(0, 0);
+          if (typeof a1 === 'number' && a1 >= 1 && a1 <= 12) return a1;
+          m = txt(a1).match(/^\s*(\d{1,2})\s*월/);
+          if (m) return +m[1];
+          m = fileName.match(/(\d{1,2})\s*월/);
+          return m ? +m[1] : null;
+        })();
+        const year = (() => {
+          const m = name.match(/(\d{2})\.\s*\d{1,2}\s*월/) || fileName.match(/(\d{2})\.\s*\d{1,2}\s*월/) || fileName.match(/(?:20)?(\d{2})년/);
+          return m ? 2000 + +m[1] : opts.defaultYear || new Date().getFullYear();
+        })();
+
+        // 현장명
+        for (let r = 0; r <= Math.min(6, R.e.r) && !site; r++) {
+          const t = txt(val(r, 0));
+          if (/현장명/.test(t)) site = t.replace(/^.*현장명\s*[:：]\s*/, '').trim();
+        }
+
+        // ---- 경유사용집계표 (A열 "장비명" 표)
+        let tables = 0, lastMonth = sheetMonth;
+        for (let hr = 0; hr <= R.e.r; hr++) {
+          if (squash(val(hr, 0)) !== '장비명') continue;
+          const find = (lab) => { for (let k = 1; k <= 8; k++) if (squash(val(hr + k, 0)).startsWith(lab)) return hr + k; return -1; };
+          const rc = find('회사'), rn = find('번호'), rd = find('날짜');
+          if (rd < 0) continue;
+          let sub = -1;
+          for (let k = rd + 1; k <= R.e.r; k++) { const t = squash(val(k, 0)); if (t === '소계' || t === '합계') { sub = k; break; } }
+          if (sub < 0) continue;
+          // 표의 달: 표 위쪽 A열의 월 표시
+          let tMonth = null;
+          for (let k = hr - 1; k >= Math.max(0, hr - 6) && tMonth === null; k--) {
+            const v = val(k, 0);
+            if (typeof v === 'number' && v >= 1 && v <= 12 && Number.isInteger(v)) tMonth = v;
+            else { const m = txt(v).match(/^\s*(\d{1,2})\s*월/); if (m) tMonth = +m[1]; }
+          }
+          if (tMonth === null) tMonth = lastMonth;
+          lastMonth = tMonth;
+          if (!sheetMonth || !tMonth) continue;
+          tables++;
+          let tc = -1;
+          for (let c = 1; c <= R.e.c; c++) if (/경유/.test(squash(val(hr, c))) && /합계/.test(squash(val(hr, c)))) { tc = c; break; }
+          const rows = [];
+          for (let k = rd + 1; k < sub; k++) {
+            const x = cell(k, 0);
+            if (!x || typeof x.v !== 'number') continue;
+            let m, d, y = year;
+            if (x.v >= 1 && x.v <= 31 && Number.isInteger(x.v)) { m = tMonth; d = x.v; if (tMonth > sheetMonth) y = year - 1; }
+            else if (x.v > 31) { const p = XLSX.SSF.parse_date_code(x.v); if (!p) continue; y = p.y; m = p.m; d = p.d; }
+            else continue;
+            rows.push({ k, y, m, d, price: tc >= 0 ? num(k, tc + 1) : 0 });
+          }
+          for (let c = 1; c <= R.e.c; c++) {
+            if (c === tc || squash(val(rd, c)) !== '수량') continue;
+            const typeRaw = txt(val(hr, c)).replace(/\s+/g, ' ').trim();
+            if (!typeRaw || /합\s*계/.test(typeRaw)) continue;
+            const plateCell = val(rn, c);
+            const plate = (txt(plateCell).match(/\d{4}/) || [typeof plateCell === 'number' ? String(plateCell).padStart(4, '0') : ''])[0];
+            const company = txt(val(rc, c)).replace(/\s+/g, ' ').trim();
+            let s = 0;
+            for (const row of rows) {
+              const q = num(row.k, c), a = num(row.k, c + 1);
+              s += q;
+              if (!q && !a) continue;
+              fuel.push({ file: fileName, sheet: name, billing: sheetMonth, year, y: row.y, m: row.m, d: row.d, plate, company, typeRaw,
+                          type: normType(typeRaw), q, a, price: row.price || (q ? a / q : 0), addr: U.encode_cell({ r: row.k, c }) });
+            }
+            const subV = num(sub, c);
+            if (plate && Math.abs(subV - s) > 0.5)
+              issue('warn', `${name} ${U.encode_cell({ r: sub, c })}`, `${company}(${plate}) 경유 소계가 일자별 합과 다름`, `소계 ${subV.toLocaleString()}L ↔ 일자별 합 ${s.toLocaleString()}L`);
+          }
+        }
+        if (tables) sheetsUsed.push({ file: fileName, sheet: name, kind: '경유사용집계표', month: sheetMonth, year, tables });
+
+        // ---- 작업일보 ("차량번호" 머리행)
+        let hr = -1, pc = -1;
+        for (let r = 0; r <= Math.min(10, R.e.r) && hr < 0; r++)
+          for (let c = 0; c <= R.e.c; c++) if (squash(val(r, c)) === '차량번호') { hr = r; pc = c; break; }
+        if (hr >= 0 && sheetMonth && !tables) {
+          const col = (lab, after = 0) => { for (let c = after; c <= R.e.c; c++) if (squash(val(hr, c)) === lab) return c; return -1; };
+          const cCompany = col('거래처'), cType = col('장비명'), cKind = col('구분'), cHours = col('수량');
+          const cRate = col('단가', cHours + 1), cAmt = col('금액', cHours + 1), cNote = col('비고');
+          const d1 = [];
+          for (let c = pc + 1; c <= R.e.c; c++) { const v = val(hr, c); if (typeof v === 'number' && v >= 1 && v <= 15) d1[v] = c; }
+          let c16 = -1;
+          for (let c = pc + 1; c <= R.e.c; c++) if (val(hr + 1, c) === 16) { c16 = c; break; }
+          let n = 0;
+          for (let r = hr + 2; r <= R.e.r; r++) {
+            const a = val(r, 0);
+            if (typeof a !== 'number') continue;
+            const company = txt(val(r, cCompany)).replace(/\s+/g, ' ').trim();
+            const typeRaw = txt(val(r, cType)).replace(/\s+/g, ' ').trim();
+            if (!company && !typeRaw) continue;
+            const note = cNote >= 0 ? txt(val(r, cNote)) : '';
+            const nm = note.match(/(\d{1,2})\s*월\s*분/);
+            const m = nm ? +nm[1] : sheetMonth;
+            const y = m > sheetMonth ? year - 1 : year;
+            const days = {};
+            let sum = 0;
+            for (let d = 1; d <= 15; d++) if (d1[d] !== undefined) { const h = num(r, d1[d]); if (h) days[d] = h; sum += h; }
+            if (c16 >= 0) for (let d = 16; d <= 31; d++) { const h = num(r + 1, c16 + d - 16); if (h) days[d] = h; sum += h; }
+            const hours = cHours >= 0 ? num(r, cHours) : sum;
+            const rate = cRate >= 0 ? num(r, cRate) : 0;
+            const amount = cAmt >= 0 ? num(r, cAmt) : 0;
+            const plates = (txt(val(r, pc)).match(/\d{4}/g) || []);
+            if (cHours >= 0 && Math.abs(hours - sum) > 0.01)
+              issue('warn', `${name} ${U.encode_cell({ r, c: cHours })}`, `${company} ${typeRaw} 작업일보 시간 합계가 일자별 합과 다름`, `합계 ${hours}h ↔ 일자별 합 ${sum}h (일자별 합을 사용)`);
+            diary.push({ file: fileName, sheet: name, row: r + 1, billing: sheetMonth, year, y, m, company, typeRaw, type: normType(typeRaw),
+                         kind: txt(val(r, cKind)).trim(), note: note.replace(/\s+/g, ' ').trim(), plates, days, hours: sum, rate, amount,
+                         addon: amount && rate ? round(amount - sum * rate, 0) : 0 });
+            n++;
+          }
+          if (n) sheetsUsed.push({ file: fileName, sheet: name, kind: '작업일보', month: sheetMonth, year, rows: n });
+        }
+
+        // ---- 오류값·외부참조
+        const errs = [], ext = [];
+        for (const k in ws) {
+          if (k[0] === '!') continue;
+          if (ws[k].t === 'e') errs.push(k);
+          if (ws[k].f && /\[\d+\]/.test(ws[k].f)) ext.push(k);
+        }
+        const used = sheetsUsed.some((s) => s.sheet === name && s.file === fileName);
+        if (used && errs.length) issue('warn', `${name} ${errs.slice(0, 3).join(', ')}`, `원자료에 오류 값 ${errs.length}칸`, '대조표 계산에는 숫자 칸만 쓰므로 영향은 없지만, 원자료 확인이 필요합니다.');
+        if (used && ext.length) issue('info', `${name} ${ext.slice(0, 3).join(', ')}`, '다른 파일을 참조하는 칸', '원본 파일이 없으면 값이 깨질 수 있습니다.');
+      }
+    }
+    return { fuel, diary, sheetsUsed, issues, site };
+  }
+
+  // ------------------------------------------------------------------ 월별 묶기·분석
+  function buildModel(input, opts = {}) {
+    const merge = opts.merge !== false;
+    const alias = opts.alias || {};
+    const A = (p) => alias[p] || p;
+    const issues = input.issues.slice();
+    const issue = (level, where, title, detail) => issues.push({ level, where, title, detail });
+    const key = (y, m) => `${y}-${pad2(m)}`;
+    const groups = new Map();
+    const G = (y, m) => { const k = key(y, m); if (!groups.has(k)) groups.set(k, { key: k, y, m, equip: new Map(), diaryOnly: [] }); return groups.get(k); };
+    const dk = (m, d) => `${pad2(m)}-${pad2(d)}`;
+
+    // 유류
+    for (const f of input.fuel) {
+      if (!f.plate || !isEquip(f.typeRaw, f.company)) continue;
+      const gy = merge ? f.year : f.y, gm = merge ? f.billing : f.m;
+      const g = G(gy, gm);
+      const p = A(f.plate);
+      if (!g.equip.has(p)) g.equip.set(p, { plate: p, company: f.company, cls: f.type, typeRaw: f.typeRaw, days: new Map(), diaryRows: [], fuelSheets: new Set(), plates: new Set() });
+      const e = g.equip.get(p);
+      e.plates.add(f.plate);
+      e.fuelSheets.add(f.sheet);
+      const k = dk(f.m, f.d);
+      const cur = e.days.get(k) || { m: f.m, d: f.d, q: 0, a: 0, h: 0, price: f.price };
+      cur.q += f.q; cur.a += f.a; cur.price = f.price || cur.price;
+      e.days.set(k, cur);
+    }
+    // 작업일보
+    for (const r of input.diary) {
+      const gy = merge ? r.year : r.y, gm = merge ? r.billing : r.m;
+      const g = groups.get(key(gy, gm));
+      const ps = r.plates.map(A);
+      const e = g && ps.map((p) => g.equip.get(p)).find(Boolean);
+      if (!e) {
+        if (r.hours > 0 && isEquip(r.typeRaw, r.company)) (g || G(gy, gm)).diaryOnly.push(r);
+        continue;
+      }
+      if (r.plates.length > 1 && ps.filter((p) => g.equip.has(p)).length > 1)
+        issue('info', `${r.sheet} ${r.row}행`, `${r.company} 한 행에 차량번호가 여러 개`, `${r.plates.join(', ')} — 시간은 ${e.plate}에 모두 넣었습니다.`);
+      e.diaryRows.push(r);
+      if (!e.companyDiary) e.companyDiary = r.company;
+      if (!e.cls) e.cls = r.type;
+      for (const [d, h] of Object.entries(r.days)) {
+        const k = dk(r.m, +d);
+        const cur = e.days.get(k) || { m: r.m, d: +d, q: 0, a: 0, h: 0, price: 0 };
+        cur.h += h;
+        e.days.set(k, cur);
+      }
+    }
+
+    // 합계·타임라인
+    const list = [...groups.values()].filter((g) => g.equip.size).sort((a, b) => a.key.localeCompare(b.key));
+    for (const g of list) {
+      const dim = new Date(g.y, g.m, 0).getDate();
+      const other = new Map();
+      for (const e of g.equip.values()) for (const v of e.days.values()) if (v.m !== g.m) other.set(dk(v.m, v.d), { m: v.m, d: v.d });
+      const otherSorted = [...other.values()].sort((a, b) => (a.m - b.m) * 100 + (a.d - b.d));
+      // 이전 달 날짜가 이번 달보다 뒤에 있으면(연도 넘어감) 앞쪽으로
+      g.timeline = [...otherSorted.map((x) => ({ ...x, label: `${x.m}/${x.d}`, own: false })),
+                    ...Array.from({ length: dim }, (_, i) => ({ m: g.m, d: i + 1, label: i + 1, own: true }))];
+      g.label = `${String(g.y).slice(2)}년 ${g.m}월`;
+      g.short = `${String(g.y).slice(2)}.${g.m}월`;
+      g.priceByDay = {};
+      for (const e of g.equip.values()) for (const v of e.days.values()) if (v.price) g.priceByDay[dk(v.m, v.d)] = v.price;
+      g.list = [...g.equip.values()].map((e) => {
+        e.company = e.company || e.companyDiary || '';
+        e.cls = e.cls || '미분류';
+        e.header = `${e.company}(${e.plate})`;
+        e.fuel = 0; e.amount = 0; e.hours = 0;
+        for (const v of e.days.values()) { e.fuel += v.q; e.amount += v.a; e.hours += v.h; }
+        e.supply = e.amount / 1.1;
+        e.rental = e.diaryRows.reduce((s, r) => s + r.hours * r.rate, 0);
+        e.rate = e.hours ? e.rental / e.hours : (e.diaryRows[0] ? e.diaryRows[0].rate : 0);
+        const rates = [...new Set(e.diaryRows.map((r) => r.rate).filter(Boolean))];
+        if (rates.length === 1) e.rate = rates[0];
+        e.billed = e.diaryRows.reduce((s, r) => s + r.amount, 0);
+        e.addon = e.diaryRows.reduce((s, r) => s + r.addon, 0);
+        e.kind = [...new Set(e.diaryRows.map((r) => r.kind).filter(Boolean))].join('/');
+        e.notes = [...new Set(e.diaryRows.map((r) => r.note).filter(Boolean))].join(', ');
+        e.lph = e.hours ? e.fuel / e.hours : null;
+        e.wonph = e.hours ? e.supply / e.hours : null;
+        e.carried = [...e.days.values()].some((v) => v.m !== g.m);
+        e.group = g;
+        if (!e.diaryRows.length)
+          issue('error', `${g.label} ${[...e.fuelSheets].join(', ')}`, `${e.header} ${e.cls}: 작업일보에서 차량번호를 찾지 못함`,
+            `경유 ${e.fuel.toLocaleString()}L가 있지만 사용시간이 0입니다. 차량번호가 다르게 적혔다면 화면의 "차량번호 연결"에서 맞춰 주세요.`);
+        if (e.lph !== null && e.lph > 60)
+          issue('error', `${g.label} ${e.header}`, `${e.cls} 시간당 ${round(e.lph)} L/h — 비정상적으로 높음`,
+            `경유 ${e.fuel.toLocaleString()}L ÷ 작업 ${round(e.hours)}h. 기종·탱크 용량, 반출 시 잔량, 작업시간 누락을 확인하세요.`);
+        if (rates.length > 1)
+          issue('info', `${g.label} ${e.header}`, '시간당 단가가 행마다 다름', `${rates.map((x) => x.toLocaleString()).join(' / ')}원 — 대조표에는 시간 가중 평균 단가 ${round(e.rate, 0).toLocaleString()}원을 넣었습니다.`);
+        return e;
+      }).sort((a, b) => a.cls.localeCompare(b.cls) || a.plate.localeCompare(b.plate));
+      for (const r of g.diaryOnly)
+        issue('info', `${g.label} ${r.sheet} ${r.row}행`, `${r.company} ${r.typeRaw}(${r.plates.join('/') || '번호 없음'}): 유류 기록 없는 장비`,
+          `작업 ${round(r.hours)}h${r.kind ? ` · ${r.kind}` : ''} — 경유대장에 없어 대조표에서 뺐습니다 (유류 포함 임대라면 정상).`);
+    }
+
+    // 기종별 가중평균
+    const classAvg = {};
+    for (const g of list) for (const e of g.list) {
+      if (!e.fuel || !e.hours) continue;
+      const c = (classAvg[e.cls] = classAvg[e.cls] || { fuel: 0, hours: 0, supply: 0, byGroup: {} });
+      c.fuel += e.fuel; c.hours += e.hours; c.supply += e.supply;
+      const b = (c.byGroup[g.key] = c.byGroup[g.key] || { fuel: 0, hours: 0, supply: 0 });
+      b.fuel += e.fuel; b.hours += e.hours; b.supply += e.supply;
+    }
+    for (const k in classAvg) {
+      const c = classAvg[k];
+      c.lph = c.fuel / c.hours; c.wonph = c.supply / c.hours;
+      for (const b of Object.values(c.byGroup)) { b.lph = b.fuel / b.hours; b.wonph = b.supply / b.hours; }
+    }
+
+    // 주유 구간 점검
+    const fills = [];
+    list.forEach((g, gi) => {
+      const prevG = list[gi - 1];
+      const siteLast = Math.max(0, ...g.list.flatMap((e) => [...e.days.values()].filter((v) => v.m === g.m && (v.h || v.q)).map((v) => v.d)));
+      for (const e of g.list) {
+        if (!e.fuel || !e.diaryRows.length) continue;
+        const base = classAvg[e.cls] ? classAvg[e.cls].lph : e.lph;
+        const prev = prevG && prevG.equip.get(e.plate);
+        let carry = 0;
+        if (prev) {
+          const pd = prevG.timeline.map((t) => prev.days.get(dk(t.m, t.d))).filter(Boolean);
+          for (let i = pd.length - 1; i >= 0; i--) { if (pd[i].q) break; carry += pd[i].h; }
+        }
+        const newcomer = !!prevG && !prev;
+        const seq = g.timeline.map((t) => ({ t, v: e.days.get(dk(t.m, t.d)) || { q: 0, h: 0 } }));
+        const worked = seq.filter((x) => x.v.h > 0);
+        const fillsIdx = seq.map((x, i) => (x.v.q > 0 ? i : -1)).filter((i) => i >= 0);
+        const lastWorkIdx = worked.length ? seq.indexOf(worked[worked.length - 1]) : -1;
+        let acc = carry, startIdx = 0, first = true;
+        seq.forEach((x, i) => {
+          acc += x.v.h;
+          if (x.v.q > 0) {
+            const lph = acc ? x.v.q / acc : null;
+            const ratio = lph === null ? null : lph / base;
+            const tags = [];
+            if (first && newcomer && worked.length && seq.indexOf(worked[0]) === i) tags.push('투입 첫 주유');
+            if (i === fillsIdx[fillsIdx.length - 1] && lastWorkIdx > i && x.t.own && seq[lastWorkIdx].t.d < siteLast - 2) tags.push('철수 전 주유');
+            if (x.t.own && x.t.d === siteLast && ratio !== null && ratio > 1.3) tags.push('월말 주유');
+            let judge = '';
+            if (lph === null) tags.push('작업 전 주유');
+            else if (ratio > 1.5) judge = '과다';
+            else if (ratio < 0.6 && acc >= 8) judge = '과소';
+            if (judge || tags.length)
+              fills.push({ group: g, e, from: seq[startIdx].t, to: x.t, fuel: x.v.q, hours: acc, carry: startIdx === 0 ? carry : 0, lph, base, ratio, judge: judge || '확인', tags });
+            acc = 0; startIdx = i + 1; first = false;
+          }
+        });
+      }
+    });
+    const order = { '과다': 0, '작업 0h': 0, '과소': 1, '확인': 2 };
+    fills.sort((a, b) => order[a.judge] - order[b.judge] || (b.ratio ?? 99) - (a.ratio ?? 99));
+
+    // 균일 시간
+    for (const g of list) {
+      const uni = g.list.filter((e) => { const hs = [...e.days.values()].filter((v) => v.m === g.m && v.h > 0).map((v) => v.h); return hs.length >= 15 && new Set(hs).size === 1; });
+      if (uni.length >= 3) issue('info', g.label, `${uni.length}대의 작업시간이 모든 날 같음`, '실가동시간(아워미터) 기록인지 확인하세요: ' + uni.map((e) => e.header).join(', '));
+    }
+    const addon = {};
+    for (const g of list) for (const e of g.list) if (e.addon) addon[g.key] = (addon[g.key] || 0) + e.addon;
+    if (Object.keys(addon).length)
+      issue('warn', '작업일보 금액', '작업일보 금액에 "단가×시간" 외 고정 가산금',
+        list.filter((g) => addon[g.key]).map((g) => `${g.label} ${Math.round(addon[g.key]).toLocaleString()}원`).join(' / ') + ' — 대조표 장비사용금액(시간×단가)에는 넣지 않고 "작업일보 청구 대조" 시트에 따로 적었습니다.');
+
+    const lvl = { error: 0, warn: 1, info: 2 };
+    issues.sort((a, b) => lvl[a.level] - lvl[b.level]);
+    const isExc = (c) => /LC|W$/i.test(c);
+    const classes = Object.keys(classAvg).sort((a, b) => (isExc(b) - isExc(a)) || classAvg[b].lph - classAvg[a].lph);
+    const groupDiaryPlates = {};
+    for (const g of list) {
+      const seen = new Map();
+      for (const r of input.diary) {
+        const gy = merge ? r.year : r.y, gm = merge ? r.billing : r.m;
+        if (key(gy, gm) !== g.key || !isEquip(r.typeRaw, r.company)) continue;
+        for (const p of r.plates) { const x = seen.get(p) || { plate: p, company: r.company, type: r.typeRaw, hours: 0 }; x.hours += r.hours; seen.set(p, x); }
+      }
+      groupDiaryPlates[g.key] = [...seen.values()];
+    }
+    const all = list.flatMap((g) => g.list);
+    const sum = (k) => all.reduce((s, e) => s + (e[k] || 0), 0);
+    const fuelOnly = all.filter((e) => !e.diaryRows.length);
+    const diaryOnlyPlates = list.flatMap((g) => g.diaryOnly.map((r) => ({ group: g.key, label: g.label, plates: r.plates, company: r.company, type: r.typeRaw, hours: r.hours })));
+    return { site: input.site, groups: list, classAvg, classes, fills, issues, merge,
+             totals: { fuel: sum('fuel'), supply: sum('supply'), hours: sum('hours'), rental: sum('rental'), billed: sum('billed'), addon: sum('addon'), equip: new Set(all.map((e) => e.plate)).size },
+             fuelOnly, diaryOnlyPlates, groupDiaryPlates, sheetsUsed: input.sheetsUsed };
+  }
+
+  // ------------------------------------------------------------------ 엑셀 만들기
+  const esc = (s) => txt(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  const colName = (n) => { let s = ''; n++; while (n) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
+  const PALETTE = ['1F5F8B', 'E08E0B', '2E8B57', '8E44AD', 'C0392B', '16A085', '7F8C8D', 'D35400', '2C3E50', 'B7950B'];
+
+  function lineChartXml({ title, sheet, catRef, cats, series, numFmt }) {
+    const q = `'${sheet.replace(/'/g, "''")}'`;
+    const ser = series.map((s, i) => {
+      const color = s.color || PALETTE[i % PALETTE.length];
+      const pts = s.values.map((v, j) => (v === null || v === undefined ? '' : `<c:pt idx="${j}"><c:v>${v}</c:v></c:pt>`)).join('');
+      return `<c:ser><c:idx val="${i}"/><c:order val="${i}"/>` +
+        `<c:tx><c:strRef><c:f>${q}!${s.nameRef}</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(s.name)}</c:v></c:pt></c:strCache></c:strRef></c:tx>` +
+        `<c:spPr><a:ln w="${s.avg ? 31750 : 22225}" cap="rnd"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${s.avg ? '<a:prstDash val="dash"/>' : ''}<a:round/></a:ln></c:spPr>` +
+        `<c:marker><c:symbol val="${s.avg ? 'none' : 'circle'}"/>${s.avg ? '' : `<c:size val="6"/><c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:ln></c:spPr>`}</c:marker>` +
+        (s.avg ? `<c:dLbls><c:numFmt formatCode="${esc(numFmt)}" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="800" b="1"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="ko-KR"/></a:p></c:txPr><c:dLblPos val="t"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>` : '') +
+        `<c:cat><c:strRef><c:f>${q}!${catRef}</c:f><c:strCache><c:ptCount val="${cats.length}"/>${cats.map((c, j) => `<c:pt idx="${j}"><c:v>${esc(c)}</c:v></c:pt>`).join('')}</c:strCache></c:strRef></c:cat>` +
+        `<c:val><c:numRef><c:f>${q}!${s.valRef}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${s.values.length}"/>${pts}</c:numCache></c:numRef></c:val>` +
+        `<c:smooth val="0"/></c:ser>`;
+    }).join('');
+    const axTxt = '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="900"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="ko-KR"/></a:p></c:txPr>';
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:roundedCorners val="0"/><c:chart>` +
+      `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1200" b="1"/></a:pPr><a:r><a:rPr lang="ko-KR" altLang="en-US" sz="1200" b="1"/><a:t>${esc(title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>` +
+      `<c:autoTitleDeleted val="0"/><c:plotArea><c:layout/><c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${ser}<c:marker val="1"/><c:axId val="50010001"/><c:axId val="50010002"/></c:lineChart>` +
+      `<c:catAx><c:axId val="50010001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF"/></a:solidFill></a:ln></c:spPr>${axTxt}<c:crossAx val="50010002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>` +
+      `<c:valAx><c:axId val="50010002"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines><c:spPr><a:ln w="6350"><a:solidFill><a:srgbClr val="E3E3E3"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="${esc(numFmt)}" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${axTxt}<c:crossAx val="50010001"/><c:crosses val="autoZero"/><c:crossBetween val="between"/></c:valAx>` +
+      `<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr></c:plotArea><c:legend><c:legendPos val="b"/><c:overlay val="0"/>${axTxt}</c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>` +
+      `<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>` +
+      `<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr><a:latin typeface="맑은 고딕"/><a:ea typeface="맑은 고딕"/></a:defRPr></a:pPr><a:endParaRPr lang="ko-KR"/></a:p></c:txPr></c:chartSpace>`;
+  }
+
+  function drawingXml(anchors) {
+    const a = anchors.map((x, i) => `<xdr:twoCellAnchor editAs="oneCell"><xdr:from><xdr:col>${x.c1}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${x.r1}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>${x.c2}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${x.r2}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
+      `<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="${i + 2}" name="차트 ${i + 1}"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm>` +
+      `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId${i + 1}"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>`).join('');
+    return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">${a}</xdr:wsDr>`;
+  }
+
+  async function buildWorkbook(ExcelJS, JSZip, model, opts = {}) {
+    const wb = new ExcelJS.Workbook();
+    wb.creator = '유류대 대조표 생성기';
+    wb.calcProperties.fullCalcOnLoad = true;
+    const FONT = { name: '맑은 고딕', size: 10 };
+    const thin = { style: 'thin', color: { argb: 'FFA6A6A6' } };
+    const BORDER = { top: thin, left: thin, bottom: thin, right: thin };
+    const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
+    const HEAD = fill('FFDCE6F1'), SUB = fill('FFF2F2F2'), TOTAL = fill('FFFFF2CC'), YEL = fill('FFFFFF00');
+    const setc = (ws, addr, value, style = {}) => {
+      const c = ws.getCell(addr);
+      c.value = value;
+      c.font = { ...FONT, ...(style.font || {}) };
+      if (style.fill) c.fill = style.fill;
+      if (style.border !== false) c.border = BORDER;
+      if (style.numFmt) c.numFmt = style.numFmt;
+      c.alignment = { vertical: 'middle', horizontal: style.align || 'center', wrapText: !!style.wrap };
+      return c;
+    };
+    const F = (formula, result) => ({ formula, result: result === undefined || result === null || (typeof result === 'number' && !isFinite(result)) ? undefined : result });
+    const N0 = '#,##0_);[Red]\\(#,##0\\);-', N1 = '#,##0.0_);[Red]\\(#,##0.0\\);-', PCT = '0.0%';
+    const site = model.site || '현장';
+    const charts = [];
+
+    // ---- 장비별 평균 (첫 시트)
+    const avgWs = wb.addWorksheet('장비별 평균', { views: [{ showGridLines: false }] });
+    const groupSheets = {};
+    const summaryRowOf = new Map();
+
+    // ---- 월별 대조표
+    for (const g of model.groups) {
+      const name = `${String(g.y).slice(2)}년 ${g.m}월`;
+      groupSheets[g.key] = name;
+      const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', xSplit: 14, ySplit: 3, showGridLines: true }] });
+      const E = g.list;
+      const n = g.timeline.length;
+      const first = 4, last = first + n - 1, totR = last + 1, supR = last + 2;
+      ws.mergeCells('A1:I1');
+      setc(ws, 'A1', `${name} ${site} 유류대 및 장비비 대조표`, { font: { size: 14, bold: true }, align: 'left', border: false });
+      ['회사명', '장비명', '유류 총 수량', '시간당 유류사용량', '유류 공급가액', '장비 사용 시간 대비 유류사용료', '장비 사용시간', '장비 사용금액', '시간당 사용금액']
+        .forEach((h, i) => setc(ws, `${colName(i)}2`, h, { fill: HEAD, font: { bold: true }, wrap: true }));
+      [['K', '시세 반영율'], ['L', '기름값 시세'], ['M', '기름값'], ['N', '일자']].forEach(([c, h]) => setc(ws, `${c}3`, h, { fill: HEAD, font: { bold: true } }));
+      E.forEach((e, i) => {
+        const c0 = 14 + 4 * i;
+        const [cq, ca, ch, cr] = [0, 1, 2, 3].map((k) => colName(c0 + k));
+        const sr = 3 + i;
+        summaryRowOf.set(`${g.key}|${e.plate}`, sr);
+        ws.mergeCells(`${cq}2:${cr}2`);
+        setc(ws, `${cq}2`, e.header, { fill: HEAD, font: { bold: true } });
+        ['유류 수량', '유류 금액', '장비사용시간', '장비사용금액'].forEach((h, k) => setc(ws, `${colName(c0 + k)}3`, h, { fill: SUB }));
+        g.timeline.forEach((t, j) => {
+          const r = first + j;
+          const v = e.days.get(`${pad2(t.m)}-${pad2(t.d)}`) || { q: 0, a: 0, h: 0 };
+          setc(ws, `${cq}${r}`, v.q || 0, { numFmt: N0 });
+          setc(ws, `${ca}${r}`, v.a || 0, { numFmt: N0 });
+          setc(ws, `${ch}${r}`, v.h || 0, { numFmt: N1 });
+          setc(ws, `${cr}${r}`, F(`$I$${sr}*${ch}${r}`, (v.h || 0) * e.rate), { numFmt: N0 });
+        });
+        setc(ws, `${cq}${totR}`, F(`SUM(${cq}${first}:${cq}${last})`, e.fuel), { numFmt: N0, fill: TOTAL, font: { bold: true } });
+        setc(ws, `${ca}${totR}`, F(`SUM(${ca}${first}:${ca}${last})`, e.amount), { numFmt: N0, fill: TOTAL, font: { bold: true } });
+        setc(ws, `${ch}${totR}`, F(`SUM(${ch}${first}:${ch}${last})`, e.hours), { numFmt: N1, fill: TOTAL, font: { bold: true } });
+        setc(ws, `${cr}${totR}`, ' - ', { fill: TOTAL });
+        setc(ws, `${cq}${supR}`, ' - ', { fill: TOTAL });
+        setc(ws, `${ca}${supR}`, F(`${ca}${totR}/1.1`, e.supply), { numFmt: N0, fill: TOTAL, font: { bold: true } });
+        setc(ws, `${ch}${supR}`, ' - ', { fill: TOTAL });
+        setc(ws, `${cr}${supR}`, F(`SUM(${cr}${first}:${cr}${last})`, e.hours * e.rate), { numFmt: N0, fill: TOTAL, font: { bold: true } });
+        // 요약행
+        setc(ws, `A${sr}`, F(`${cq}2`, e.header), { fill: YEL });
+        setc(ws, `B${sr}`, e.cls);
+        setc(ws, `C${sr}`, F(`${cq}${totR}`, e.fuel), { numFmt: N0 });
+        setc(ws, `D${sr}`, F(`IFERROR(C${sr}/G${sr},0)`, e.lph || 0), { numFmt: N1, fill: YEL });
+        setc(ws, `E${sr}`, F(`${ca}${supR}`, e.supply), { numFmt: N0 });
+        setc(ws, `F${sr}`, F(`IFERROR(E${sr}/G${sr},0)`, e.wonph || 0), { numFmt: N0 });
+        setc(ws, `G${sr}`, F(`${ch}${totR}`, e.hours), { numFmt: N1 });
+        setc(ws, `H${sr}`, F(`${cr}${supR}`, e.hours * e.rate), { numFmt: N0 });
+        setc(ws, `I${sr}`, round(e.rate, 0), { numFmt: N0 });
+        ws.getColumn(c0 + 1).width = 9; ws.getColumn(c0 + 2).width = 11; ws.getColumn(c0 + 3).width = 11; ws.getColumn(c0 + 4).width = 12;
+      });
+      g.timeline.forEach((t, j) => {
+        const r = first + j;
+        const price = g.priceByDay[`${pad2(t.m)}-${pad2(t.d)}`] || '';
+        setc(ws, `K${r}`, F(`IF(L${r}="","",M${r}/L${r}-1)`), { numFmt: PCT });
+        setc(ws, `L${r}`, null, { numFmt: N0 });
+        setc(ws, `M${r}`, price, { numFmt: N0 });
+        setc(ws, `N${r}`, t.own ? t.d : t.label, { fill: t.own ? undefined : SUB, font: t.own ? {} : { color: { argb: 'FF7F6000' } } });
+      });
+      setc(ws, `N${totR}`, '총 계', { fill: TOTAL, font: { bold: true } });
+      setc(ws, `N${supR}`, '공급가액', { fill: TOTAL, font: { bold: true } });
+      const noteR = 4 + E.length + 1;
+      ws.mergeCells(`A${noteR}:I${noteR}`);
+      setc(ws, `A${noteR}`, '※ 유류는 경유사용집계표, 사용시간·시간당 단가는 장비작업일보에서 가져왔습니다. 기름값 시세(L열)는 필요할 때 직접 입력하세요.' +
+        (g.timeline.some((t) => !t.own) ? ' 회색 일자(예: 4/20)는 이 달 대장·작업일보에 함께 적힌 이전 달 기록입니다.' : ''),
+        { border: false, align: 'left', font: { size: 9, color: { argb: 'FF7F7F7F' } }, wrap: true });
+      ws.getRow(noteR).height = 30;
+      [16, 9, 11, 11, 13, 13, 11, 13, 11, 2, 9, 10, 9, 7].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      ws.getRow(2).height = 32;
+    }
+
+    // ---- 장비별 평균 채우기
+    const months = model.groups;
+    const ws = avgWs;
+    setc(ws, 'A1', `${site} 장비별 월 유류사용량 · 시간당 사용량`, { font: { size: 14, bold: true }, align: 'left', border: false });
+    ws.mergeCells('A1:H1');
+    let row = 3;
+    const MC = 9; // J열부터 차트 데이터
+    const chartCol = MC + 1 + months.length + 1;
+    for (const cls of model.classes.concat(Object.keys(model.groups.reduce((o, g) => { g.list.forEach((e) => { if (!model.classAvg[e.cls]) o[e.cls] = 1; }); return o; }, {})))) {
+      const top = row;
+      setc(ws, `A${row}`, '장비명', { fill: HEAD, font: { bold: true } });
+      ws.mergeCells(`B${row}:G${row}`);
+      setc(ws, `B${row}`, cls, { fill: HEAD, font: { bold: true, size: 11 } });
+      row++;
+      ['월', '업체명', '유류 총 사용량', '유류 공급가액', '장비 사용시간', '시간당 유류사용량', '시간 대비 유류사용료'].forEach((h, i) => setc(ws, `${colName(i)}${row}`, h, { fill: SUB, font: { bold: true } }));
+      row++;
+      const first = row;
+      const cellOf = {}; // plate -> groupKey -> row
+      const labels = new Map();
+      const groupRange = {};
+      for (const g of months) {
+        const es = g.list.filter((e) => e.cls === cls);
+        if (!es.length) continue;
+        const r0 = row;
+        const sh = `'${groupSheets[g.key]}'!`;
+        for (const e of es) {
+          const sr = summaryRowOf.get(`${g.key}|${e.plate}`);
+          setc(ws, `B${row}`, F(`${sh}A${sr}`, e.header), { align: 'left' });
+          setc(ws, `C${row}`, F(`${sh}C${sr}`, e.fuel), { numFmt: N0 });
+          setc(ws, `D${row}`, F(`${sh}E${sr}`, e.supply), { numFmt: N0 });
+          setc(ws, `E${row}`, F(`${sh}G${sr}`, e.hours), { numFmt: N1 });
+          setc(ws, `F${row}`, F(`IFERROR(C${row}/E${row},0)`, e.lph || 0), { numFmt: N1 });
+          setc(ws, `G${row}`, F(`IFERROR(D${row}/E${row},0)`, e.wonph || 0), { numFmt: N0 });
+          (cellOf[e.plate] = cellOf[e.plate] || {})[g.key] = { row, lph: e.lph, wonph: e.wonph };
+          if (!labels.has(e.plate)) labels.set(e.plate, e.header);
+          row++;
+        }
+        if (row - 1 > r0) ws.mergeCells(`A${r0}:A${row - 1}`);
+        setc(ws, `A${r0}`, g.short);
+        groupRange[g.key] = [r0, row - 1];
+      }
+      const last = row - 1;
+      const C = `C${first}:C${last}`, Dd = `D${first}:D${last}`, Ee = `E${first}:E${last}`;
+      const avg = model.classAvg[cls];
+      setc(ws, `A${row}`, '', { fill: TOTAL });
+      setc(ws, `B${row}`, '평균 (F·G 가중)', { fill: TOTAL, font: { bold: true } });
+      setc(ws, `C${row}`, F(`IFERROR(AVERAGEIF(${C},">0"),0)`), { fill: TOTAL, numFmt: N0, font: { bold: true } });
+      setc(ws, `D${row}`, F(`IFERROR(AVERAGEIF(${C},">0",${Dd}),0)`), { fill: TOTAL, numFmt: N0, font: { bold: true } });
+      setc(ws, `E${row}`, F(`IFERROR(AVERAGEIF(${C},">0",${Ee}),0)`), { fill: TOTAL, numFmt: N1, font: { bold: true } });
+      setc(ws, `F${row}`, F(`IFERROR(SUMIF(${C},">0")/SUMIFS(${Ee},${C},">0"),0)`, avg ? avg.lph : 0), { fill: TOTAL, numFmt: N1, font: { bold: true } });
+      setc(ws, `G${row}`, F(`IFERROR(SUMIF(${C},">0",${Dd})/SUMIFS(${Ee},${C},">0"),0)`, avg ? avg.wonph : 0), { fill: TOTAL, numFmt: N0, font: { bold: true } });
+      const avgRow = row;
+      row++;
+
+      // 차트 데이터 (J열~): 사용량 표, 사용료 표
+      const plates = [...labels.keys()];
+      const gks = months.map((g) => g.key);
+      const mats = [];
+      let mr = top;
+      for (const [kind, col, fmt, key] of [['L/h', 'F', N1, 'lph'], ['원/h', 'G', N0, 'wonph']]) {
+        const hr = mr;
+        setc(ws, `${colName(MC)}${hr}`, `그래프 자료 (${kind})`, { fill: SUB, font: { bold: true, size: 9 } });
+        months.forEach((g, i) => setc(ws, `${colName(MC + 1 + i)}${hr}`, g.short, { fill: SUB, font: { size: 9 } }));
+        const series = [];
+        plates.forEach((p, k) => {
+          const r = hr + 1 + k;
+          setc(ws, `${colName(MC)}${r}`, labels.get(p), { align: 'left', font: { size: 9 } });
+          const vals = gks.map((gk, i) => {
+            const x = cellOf[p][gk];
+            const a = `${colName(MC + 1 + i)}${r}`;
+            if (x && x[key] !== null) { setc(ws, a, F(`${col}${x.row}`, x[key]), { numFmt: fmt, font: { size: 9 } }); return round(x[key], 2); }
+            setc(ws, a, null, { font: { size: 9 } });
+            return null;
+          });
+          series.push({ name: labels.get(p), nameRef: `$${colName(MC)}$${r}`, valRef: `$${colName(MC + 1)}$${r}:$${colName(MC + months.length)}$${r}`, values: vals });
+        });
+        const ar = hr + 1 + plates.length;
+        setc(ws, `${colName(MC)}${ar}`, '평균', { align: 'left', fill: TOTAL, font: { size: 9, bold: true } });
+        const avals = gks.map((gk, i) => {
+          const a = `${colName(MC + 1 + i)}${ar}`;
+          const gr = groupRange[gk];
+          const b = avg && avg.byGroup[gk];
+          if (gr && b) {
+            const num = key === 'lph' ? 'C' : 'D';
+            setc(ws, a, F(`IFERROR(SUMIF(C${gr[0]}:C${gr[1]},">0",${num}${gr[0]}:${num}${gr[1]})/SUMIFS(E${gr[0]}:E${gr[1]},C${gr[0]}:C${gr[1]},">0"),0)`, b[key]), { numFmt: fmt, fill: TOTAL, font: { size: 9, bold: true } });
+            return round(b[key], 2);
+          }
+          setc(ws, a, null, { fill: TOTAL });
+          return null;
+        });
+        series.push({ name: '평균', nameRef: `$${colName(MC)}$${ar}`, valRef: `$${colName(MC + 1)}$${ar}:$${colName(MC + months.length)}$${ar}`, values: avals, avg: true, color: '404040' });
+        mats.push({ kind, hr, series, fmt: key === 'lph' ? '#,##0.0' : '#,##0' });
+        mr = ar + 2;
+      }
+      const blockEnd = Math.max(row, mr, top + 17);
+      mats.forEach((m, i) => {
+        const c1 = chartCol + i * 8;
+        charts.push({
+          anchor: { c1, r1: top - 1, c2: c1 + 8, r2: top - 1 + 16 },
+          xml: lineChartXml({
+            title: `${cls} ${m.kind === 'L/h' ? '시간당 유류사용량 (L/h)' : '시간당 유류사용료 (원/h)'}`,
+            sheet: '장비별 평균', catRef: `$${colName(MC + 1)}$${m.hr}:$${colName(MC + months.length)}$${m.hr}`,
+            cats: months.map((g) => g.short), series: m.series, numFmt: m.fmt,
+          }),
+        });
+      });
+      row = blockEnd + 2;
+    }
+    [9, 22, 13, 14, 12, 13, 14, 2, 2].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+    ws.getColumn(MC + 1).width = 20;
+    for (let i = 0; i < months.length; i++) ws.getColumn(MC + 2 + i).width = 9;
+
+    // ---- 작업일보 청구 대조
+    const bw = wb.addWorksheet('작업일보 청구 대조', { views: [{ state: 'frozen', ySplit: 2 }] });
+    setc(bw, 'A1', '장비작업일보 청구금액 대조 (공급가액)', { font: { size: 13, bold: true }, align: 'left', border: false });
+    const bh = ['월', '업체(차량번호)', '장비명', '구분', '비고', '사용시간(h)', '시간당 단가', '시간×단가', '작업일보 금액', '고정 가산금', '유류 공급가액', '유류비÷청구액'];
+    bh.forEach((h, i) => setc(bw, `${colName(i)}2`, h, { fill: HEAD, font: { bold: true } }));
+    let br = 3;
+    for (const g of model.groups) for (const e of g.list) {
+      [g.label, e.header, e.cls, e.kind, e.notes].forEach((v, i) => setc(bw, `${colName(i)}${br}`, v, { align: i ? 'left' : 'center' }));
+      setc(bw, `F${br}`, e.hours, { numFmt: N1 });
+      setc(bw, `G${br}`, round(e.rate, 0), { numFmt: N0 });
+      setc(bw, `H${br}`, round(e.rental, 0), { numFmt: N0 });
+      setc(bw, `I${br}`, round(e.billed, 0), { numFmt: N0 });
+      setc(bw, `J${br}`, F(`I${br}-H${br}`, e.billed - e.rental), { numFmt: N0, fill: Math.abs(e.billed - e.rental) >= 1 ? YEL : undefined });
+      setc(bw, `K${br}`, round(e.supply, 0), { numFmt: N0 });
+      setc(bw, `L${br}`, F(`IFERROR(K${br}/I${br},0)`, e.billed ? e.supply / e.billed : 0), { numFmt: '0%' });
+      br++;
+    }
+    setc(bw, `A${br}`, '합계', { fill: TOTAL, font: { bold: true } });
+    for (const c of 'BCDE') setc(bw, `${c}${br}`, '', { fill: TOTAL });
+    for (const c of 'FHIJK') setc(bw, `${c}${br}`, F(`SUM(${c}3:${c}${br - 1})`), { fill: TOTAL, numFmt: c === 'F' ? N1 : N0, font: { bold: true } });
+    setc(bw, `G${br}`, '', { fill: TOTAL }); setc(bw, `L${br}`, '', { fill: TOTAL });
+    [10, 24, 10, 10, 18, 11, 11, 13, 13, 13, 13, 11].forEach((w, i) => { bw.getColumn(i + 1).width = w; });
+
+    // ---- 점검 결과
+    const cw = wb.addWorksheet('점검 결과');
+    setc(cw, 'A1', '주유 구간 점검 (직전 주유 후 작업시간 대비)', { font: { size: 13, bold: true }, align: 'left', border: false });
+    ['판정', '월', '기종', '업체(차량번호)', '구간', '주유량(L)', '작업시간(h)', '구간 L/h', '기종 평균 L/h', '평균 대비', '표시'].forEach((h, i) => setc(cw, `${colName(i)}2`, h, { fill: HEAD, font: { bold: true } }));
+    let cr = 3;
+    for (const f of model.fills) {
+      const lab = (t) => `${t.m}/${t.d}`;
+      const vals = [f.judge, f.group.label, f.e.cls, f.e.header, f.from === f.to ? lab(f.to) : `${lab(f.from)}~${lab(f.to)}`, f.fuel, f.hours, f.lph === null ? '-' : round(f.lph, 1), round(f.base, 1), f.ratio === null ? '-' : f.ratio, f.tags.join(', ')];
+      vals.forEach((v, i) => setc(cw, `${colName(i)}${cr}`, v, { numFmt: i === 9 ? '0%' : i === 6 ? N1 : i === 5 ? N0 : undefined, align: i === 3 || i === 10 ? 'left' : 'center',
+        fill: i === 0 ? fill(f.judge === '과소' ? 'FFDDEBF7' : f.judge === '확인' ? 'FFF2F2F2' : 'FFF8CBAD') : undefined }));
+      cr++;
+    }
+    if (!model.fills.length) { setc(cw, `A${cr}`, '특이 구간 없음', { border: false, align: 'left' }); cr++; }
+    cr += 2;
+    setc(cw, `A${cr}`, '자료 확인 사항', { font: { size: 13, bold: true }, align: 'left', border: false });
+    cr++;
+    ['구분', '위치', '내용', '설명'].forEach((h, i) => setc(cw, `${colName(i)}${cr}`, h, { fill: HEAD, font: { bold: true } }));
+    cr++;
+    const LV = { error: '오류', warn: '주의', info: '참고' };
+    for (const i of model.issues) {
+      [LV[i.level], i.where, i.title, i.detail].forEach((v, k) => setc(cw, `${colName(k)}${cr}`, v, { align: k ? 'left' : 'center', wrap: k >= 2 }));
+      cr++;
+    }
+    [9, 22, 36, 60, 16, 10, 11, 10, 12, 10, 22].forEach((w, i) => { cw.getColumn(i + 1).width = w; });
+
+    // ---- 읽은 자료
+    const sw = wb.addWorksheet('읽은 자료');
+    ['파일', '시트', '종류', '달', '비고'].forEach((h, i) => setc(sw, `${colName(i)}1`, h, { fill: HEAD, font: { bold: true } }));
+    model.sheetsUsed.forEach((s, i) => [s.file, s.sheet, s.kind, `${s.year}.${s.month}월`, s.kind === '경유사용집계표' ? `표 ${s.tables}개` : `장비 ${s.rows}행`]
+      .forEach((v, k) => setc(sw, `${colName(k)}${i + 2}`, v, { align: 'left' })));
+    setc(sw, `A${model.sheetsUsed.length + 3}`, model.merge ? '※ 이 달 대장·작업일보에 함께 적힌 이전 달 기록(N월분)은 해당 시트의 달에 합쳐 계산했습니다.' : '※ 이전 달 기록(N월분)은 실제 날짜의 달로 나눠 계산했습니다.', { border: false, align: 'left', font: { size: 9 } });
+    [34, 34, 16, 10, 14].forEach((w, i) => { sw.getColumn(i + 1).width = w; });
+
+    // ---- 쓰기 + 그래프 넣기
+    const buf = await wb.xlsx.writeBuffer();
+    if (!charts.length) return new Uint8Array(buf);
+    const zip = await JSZip.loadAsync(buf);
+    const wbXml = await zip.file('xl/workbook.xml').async('string');
+    const relsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+    const sheetTag = wbXml.match(/<sheet [^>]*name="장비별 평균"[^>]*>/)[0];
+    const rid = sheetTag.match(/r:id="([^"]+)"/)[1];
+    const target = relsXml.match(new RegExp(`<Relationship[^>]*Id="${rid}"[^>]*>`))[0].match(/Target="([^"]+)"/)[1];
+    const sheetPath = 'xl/' + target.replace(/^\/?xl\//, '').replace(/^\//, '');
+    const sheetFile = sheetPath.split('/').pop();
+    const relsPath = `xl/worksheets/_rels/${sheetFile}.rels`;
+    let sheetXml = await zip.file(sheetPath).async('string');
+    let sheetRels = zip.file(relsPath) ? await zip.file(relsPath).async('string')
+      : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+    const drawName = 'drawingFuel1.xml';
+    sheetRels = sheetRels.replace('</Relationships>', `<Relationship Id="rIdFuelDrw" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/${drawName}"/></Relationships>`);
+    zip.file(relsPath, sheetRels);
+    if (!/xmlns:r=/.test(sheetXml.slice(0, 600))) sheetXml = sheetXml.replace('<worksheet ', '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
+    const tagD = '<drawing r:id="rIdFuelDrw"/>';
+    const m = sheetXml.match(/<(legacyDrawing|legacyDrawingHF|picture|oleObjects|controls|webPublishItems|tableParts|extLst)[\s>\/]/);
+    sheetXml = m ? sheetXml.replace(m[0], tagD + m[0]) : sheetXml.replace('</worksheet>', tagD + '</worksheet>');
+    zip.file(sheetPath, sheetXml);
+    zip.file(`xl/drawings/${drawName}`, drawingXml(charts.map((c) => c.anchor)));
+    zip.file(`xl/drawings/_rels/${drawName}.rels`, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
+      charts.map((c, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chartFuel${i + 1}.xml"/>`).join('') + '</Relationships>');
+    charts.forEach((c, i) => zip.file(`xl/charts/chartFuel${i + 1}.xml`, c.xml));
+    let ct = await zip.file('[Content_Types].xml').async('string');
+    ct = ct.replace('</Types>', `<Override PartName="/xl/drawings/${drawName}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>` +
+      charts.map((c, i) => `<Override PartName="/xl/charts/chartFuel${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`).join('') + '</Types>');
+    zip.file('[Content_Types].xml', ct);
+    return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
+  }
+
+  const api = { readInputs, buildModel, buildWorkbook, normType, isEquip };
+  root.FuelGen = api;
+  if (typeof module !== 'undefined') module.exports = api;
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+(function () {
+  'use strict';
+  const SAMPLE_B64 = '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';
+  const $ = (id) => document.getElementById(id);
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const f0 = (x) => (x == null || !isFinite(x) ? '–' : Math.round(x).toLocaleString('ko-KR'));
+  const f1 = (x) => (x == null || !isFinite(x) ? '–' : (Math.round(x * 10) / 10).toLocaleString('ko-KR', { minimumFractionDigits: 1, maximumFractionDigits: 1 }));
+  const man = (x) => (x == null ? '–' : Math.abs(x) >= 1e8 ? (Math.round(x / 1e6) / 100).toLocaleString('ko-KR') + '억' : Math.round(x / 1e4).toLocaleString('ko-KR') + '만');
+  const COLORS = ['--s2', '--s1', '--s3', '--s4', '--s5', '--s6', '--s7', '--s8'];
+  const css = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+  const LEVEL = { error: ['p-bad', '오류'], warn: ['p-warn', '주의'], info: ['p-info', '참고'] };
+  const JUDGE = { '과다': 'p-bad', '과소': 'p-info', '확인': 'p-mute' };
+  const G = window.FuelGen;
+
+  const state = { books: [], input: null, model: null, opts: { merge: true, alias: {}, site: '' }, unit: 'L/h', month: null,
+                  fillFilter: '전체', issueFilter: 'all', isSample: false };
+  let downloads = null;
+
+  const showMsg = (text, isErr) => { const m = $('msg'); m.textContent = text || ''; m.className = 'notice' + (isErr ? ' err' : ''); m.hidden = !text; };
+
+  function parse(buf, name) {
+    if (!window.XLSX) throw new Error('엑셀 읽기 도구를 불러오지 못했습니다. 인터넷 연결을 확인한 뒤 새로고침하세요.');
+    return { wb: XLSX.read(buf, { type: 'array', cellFormula: true }), fileName: name };
+  }
+
+  async function addFiles(list) {
+    const files = [...list].filter((f) => /\.xls[xm]$/i.test(f.name));
+    if (!files.length) { showMsg('.xlsx 파일을 선택하세요.', true); return; }
+    if (state.isSample) { state.books = []; state.isSample = false; state.opts.alias = {}; state.opts.site = ''; $('site').value = ''; }
+    const errs = [];
+    for (const f of files) {
+      try { state.books = state.books.filter((b) => b.fileName !== f.name); state.books.push(parse(new Uint8Array(await f.arrayBuffer()), f.name)); }
+      catch (e) { errs.push(`${f.name}: ${e.message || e}`); }
+    }
+    recompute();
+    if (errs.length) showMsg(errs.join(' / '), true);
+  }
+
+  function loadSample() {
+    try {
+      const bin = atob(SAMPLE_B64); const buf = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) buf[i] = bin.charCodeAt(i);
+      state.books = [parse(buf, '예시현장_작업일보·경유사용집계표.xlsx')];
+      state.isSample = true; state.opts.alias = {}; state.opts.site = ''; $('site').value = '';
+      recompute();
+    } catch (e) { showMsg(e.message, true); }
+  }
+
+  function recompute() {
+    renderFiles();
+    if (!state.books.length) { state.input = state.model = null; $('result').hidden = true; renderSteps(); showMsg(''); return; }
+    state.input = G.readInputs(XLSX, state.books, { defaultYear: new Date().getFullYear() });
+    const hasFuel = state.input.fuel.length, hasDiary = state.input.diary.length;
+    if (!hasFuel || !hasDiary) {
+      state.model = null; $('result').hidden = true; renderSteps();
+      showMsg(!hasFuel && !hasDiary ? '경유사용집계표("장비명·번호·날짜" 표)와 장비작업일보("차량번호" 머리행) 시트를 찾지 못했습니다.'
+        : !hasFuel ? '장비작업일보는 읽었습니다. 경유사용집계표 파일도 올려 주세요.' : '경유사용집계표는 읽었습니다. 장비작업일보 파일도 올려 주세요.', !hasFuel && !hasDiary);
+      return;
+    }
+    state.model = G.buildModel(state.input, state.opts);
+    state.model.site = state.opts.site || state.input.site || '현장';
+    if (!state.model.groups.length) { showMsg('유류와 작업시간이 함께 있는 장비를 찾지 못했습니다.', true); $('result').hidden = true; renderSteps(); return; }
+    if (!state.month || !state.model.groups.some((g) => g.key === state.month)) state.month = state.model.groups[state.model.groups.length - 1].key;
+    showMsg(state.isSample ? '가상의 예시 현장 자료로 만든 결과입니다. 내 원자료를 올리면 바뀝니다.' : '');
+    renderSteps();
+    render();
+  }
+
+  // ---------- steps
+  function renderFiles() {
+    $('flist').innerHTML = state.books.map((b, i) => `<div class="frow"><span>${esc(b.fileName)}</span>${state.isSample ? '<span class="pill p-mute">예시</span>' : `<button type="button" data-rm="${i}" aria-label="${esc(b.fileName)} 빼기">×</button>`}</div>`).join('');
+  }
+  function renderSteps() {
+    const inp = state.input, m = state.model;
+    $('sheets').innerHTML = inp ? inp.sheetsUsed.map((s) => `<span class="pill ${s.kind === '작업일보' ? 'p-info' : 'p-warn'}">${esc(s.kind)} ${s.month}월</span>`).join('') : '';
+    if (inp && !state.opts.site) $('site').placeholder = inp.site || '현장명';
+    // 차량번호 연결
+    const box = $('alias');
+    if (m && (m.fuelOnly.length || Object.keys(state.opts.alias).length)) {
+      const rows = m.fuelOnly.map((e) => {
+        const opts = (m.groupDiaryPlates[e.group.key] || []).filter((p) => p.plate !== e.plate)
+          .map((p) => `<option value="${esc(p.plate)}">${esc(p.company)} ${esc(p.type)} (${esc(p.plate)}) · ${f1(p.hours)}h</option>`).join('');
+        return `<div class="row"><span><strong>${esc(e.header)}</strong> · ${esc(e.group.label)} 경유 ${f0(e.fuel)}L — 작업일보에 같은 차량번호가 없습니다.</span>
+          <label class="field" for="al-${esc(e.plate)}">작업일보의 어느 장비와 같은가요?
+          <select id="al-${esc(e.plate)}" data-alias="${esc(e.plate)}"><option value="">연결 안 함 (시간 0으로 둠)</option>${opts}</select></label></div>`;
+      });
+      const done = Object.entries(state.opts.alias).map(([from, to]) => `<div class="frow"><span>경유대장 ${esc(from)} → 작업일보 ${esc(to)} 로 연결함</span><button type="button" data-unalias="${esc(from)}" aria-label="연결 풀기">×</button></div>`);
+      box.innerHTML = `<div class="field"><span>차량번호 연결</span></div>${rows.join('')}${done.join('')}`;
+    } else box.innerHTML = m ? '<p class="help">경유대장과 작업일보의 차량번호가 모두 맞습니다.</p>' : '';
+    // 출력 목록
+    $('outlist').innerHTML = m ? [
+      `<li><b>장비별 평균</b> — 기종 ${m.classes.length}개 표 + 그래프 ${m.classes.length * 2}개</li>`,
+      ...m.groups.map((g) => `<li><b>${esc(g.label)}</b> 대조표 — 장비 ${g.list.length}대</li>`),
+      '<li><b>작업일보 청구 대조</b>, <b>점검 결과</b>, <b>읽은 자료</b></li>',
+    ].join('') : '<li>원자료를 올리면 만들 시트가 여기에 표시됩니다.</li>';
+    const ok = !!m && !!window.ExcelJS && !!window.JSZip;
+    $('exportBtn').disabled = !ok || !downloads;
+    $('exportHelp').textContent = !m ? '수식이 살아 있는 엑셀로 만듭니다. 그래프는 "장비별 평균" 시트에 들어갑니다.'
+      : !window.ExcelJS || !window.JSZip ? '엑셀 만들기 도구를 불러오지 못했습니다. 새로고침해 보세요.'
+      : !downloads ? '이 화면에서는 파일 저장을 쓸 수 없습니다. claude.ai에서 페이지를 열어 주세요.'
+      : `${m.groups.map((g) => g.label).join(', ')} · 수식이 살아 있는 엑셀로 만듭니다.`;
+  }
+
+  // ---------- result
+  function render() {
+    const m = state.model;
+    $('result').hidden = false;
+    $('siteName').textContent = m.site;
+    $('siteMeta').textContent = `${m.groups.map((g) => g.label).join(' · ')} · 장비 ${m.totals.equip}대 · ${m.merge ? '이전 달 기록 합침' : '실제 달로 나눔'}`;
+    $('uL').setAttribute('aria-pressed', state.unit === 'L/h');
+    $('uW').setAttribute('aria-pressed', state.unit !== 'L/h');
+    const lv = { error: 0, warn: 0, info: 0 }; m.issues.forEach((i) => lv[i.level]++);
+    const fj = m.fills.filter((f) => f.judge !== '확인').length;
+    $('tiles').innerHTML = [
+      ['유류 사용량', `${f0(m.totals.fuel)} L`, `공급가 ${man(m.totals.supply)}원`],
+      ['장비 사용시간', `${f0(m.totals.hours)} h`, `평균 ${f1(m.totals.fuel / m.totals.hours)} L/h (전 기종)`],
+      ['장비사용금액', `${man(m.totals.rental)}원`, m.totals.addon ? `작업일보 가산금 ${man(m.totals.addon)}원 별도` : '작업일보 금액과 같음'],
+      ['점검 필요', `${fj + lv.error + lv.warn}건`, `<span class="counts"><span class="pill p-mute">주유 ${fj}</span><span class="pill p-bad">오류 ${lv.error}</span><span class="pill p-warn">주의 ${lv.warn}</span><span class="pill p-info">참고 ${lv.info}</span></span>`],
+    ].map(([k, b, s]) => `<div class="tile"><span class="k">${k}</span><b>${b}</b><span class="s">${s}</span></div>`).join('');
+    $('cCheck').textContent = fj + m.issues.filter((i) => i.level !== 'info').length;
+    renderAvg(); renderMonth(); renderBill(); renderCheck();
+  }
+
+  function lineChart(title, labels, series, fmt) {
+    const W = 560, H = 270, L = 62, R = 58, T = 14, B = 30;
+    const vals = series.flatMap((s) => s.values).filter((v) => v != null);
+    if (!vals.length) return `<p class="empty">그릴 값이 없습니다.</p>`;
+    const raw = Math.max(...vals) || 1;
+    const p = 10 ** Math.floor(Math.log10(raw / 5)); const n = raw / 5 / p;
+    const step = (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
+    const max = Math.ceil(raw / step) * step;
+    const x = (i) => L + (labels.length === 1 ? (W - L - R) / 2 : i * (W - L - R) / (labels.length - 1));
+    const y = (v) => T + (H - T - B) * (1 - v / max);
+    let g = '';
+    for (let v = 0; v <= max + 1e-9; v += step) g += `<line class="grid" x1="${L}" x2="${W - R}" y1="${y(v)}" y2="${y(v)}"/><text x="${L - 8}" y="${y(v) + 4}" text-anchor="end">${fmt(v)}</text>`;
+    labels.forEach((l, i) => { g += `<text x="${x(i)}" y="${H - 8}" text-anchor="middle">${esc(l)}</text>`; });
+    for (const s of series) {
+      const col = css(s.color);
+      const segs = []; let cur = [];
+      s.values.forEach((v, i) => { if (v == null) { if (cur.length) segs.push(cur); cur = []; } else cur.push([x(i), y(v)]); });
+      if (cur.length) segs.push(cur);
+      for (const sg of segs) g += `<polyline fill="none" stroke="${col}" stroke-width="${s.avg ? 2.5 : 2}" ${s.avg ? 'stroke-dasharray="6 4"' : ''} stroke-linejoin="round" points="${sg.map((q) => q.join(',')).join(' ')}"/>`;
+      if (!s.avg) s.values.forEach((v, i) => { if (v != null) g += `<circle cx="${x(i)}" cy="${y(v)}" r="3.2" fill="${col}"><title>${esc(s.name)} ${esc(labels[i])}: ${fmt(v)}</title></circle>`; });
+      else s.values.forEach((v, i) => { if (v != null) g += `<text x="${x(i)}" y="${y(v) - 8}" text-anchor="middle" style="fill:${col};font-weight:700;font-family:var(--mono);font-size:11px">${fmt(v)}</text>`; });
+    }
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)}">${g}</svg>` +
+      `<div class="legend">${series.map((s) => `<span><i class="${s.avg ? 'dash' : ''}" style="border-color:var(${s.color})"></i>${esc(s.name)}</span>`).join('')}</div>`;
+  }
+
+  function renderAvg() {
+    const m = state.model, lph = state.unit === 'L/h', key = lph ? 'lph' : 'wonph', fmt = lph ? f1 : f0;
+    const labels = m.groups.map((g) => g.short);
+    const allCls = [...m.classes, ...new Set(m.groups.flatMap((g) => g.list.map((e) => e.cls)).filter((c) => !m.classAvg[c]))];
+    $('charts').innerHTML = allCls.map((cls) => {
+      const plates = [...new Map(m.groups.flatMap((g) => g.list.filter((e) => e.cls === cls).map((e) => [e.plate, e.header]))).entries()];
+      const series = plates.map(([p, name], i) => ({ name, color: COLORS[i % COLORS.length],
+        values: m.groups.map((g) => { const e = g.equip.get(p); return e && e.cls === cls && e[key] != null ? e[key] : null; }) }));
+      const avg = m.classAvg[cls];
+      series.push({ name: '평균', color: '--ink', avg: true, values: m.groups.map((g) => (avg && avg.byGroup[g.key] ? avg.byGroup[g.key][key] : null)) });
+      const table = `<div class="scroll"><table class="mini"><thead><tr><th>업체</th>${labels.map((l) => `<th class="n">${esc(l)}</th>`).join('')}</tr></thead><tbody>` +
+        series.map((s) => `<tr${s.avg ? ' class="avg"' : ''}><td>${esc(s.name)}</td>${s.values.map((v) => `<td class="n">${v == null ? '' : fmt(v)}</td>`).join('')}</tr>`).join('') + '</tbody></table></div>';
+      return `<article class="card chart"><div class="card-head"><div><h3>${esc(cls)} 시간당 유류사용${lph ? '량' : '료'}</h3><p>${lph ? 'L/h' : '원/h (공급가)'} · 평균 = 총 유류 ÷ 총 시간${avg ? ` · 전체 ${fmt(avg[key])}` : ''}</p></div></div>${lineChart(cls, labels, series, fmt)}${table}</article>`;
+    }).join('');
+  }
+
+  function renderMonth() {
+    const m = state.model;
+    $('monthChips').innerHTML = m.groups.map((g) => `<button type="button" class="chip" data-month="${g.key}" aria-pressed="${g.key === state.month}">${esc(g.label)}</button>`).join('');
+    const g = m.groups.find((x) => x.key === state.month);
+    $('monthTitle').textContent = `${g.label} 유류대 및 장비비 대조표`;
+    $('monthTable').innerHTML = `<thead><tr><th>회사명</th><th>장비명</th><th class="n">유류 총 수량</th><th class="n">L/h</th><th class="n">유류 공급가액</th><th class="n">원/h</th><th class="n">사용시간</th><th class="n">장비사용금액</th><th class="n">시간당 단가</th><th>비고</th></tr></thead><tbody>` +
+      g.list.map((e) => `<tr><td>${esc(e.header)}</td><td>${esc(e.cls)}</td><td class="n">${f0(e.fuel)}</td><td class="n"><b>${e.lph == null ? '–' : f1(e.lph)}</b></td><td class="n">${f0(e.supply)}</td><td class="n">${f0(e.wonph)}</td><td class="n">${f1(e.hours)}</td><td class="n">${f0(e.rental)}</td><td class="n">${f0(e.rate)}</td>` +
+        `<td>${!e.diaryRows.length ? '<span class="pill p-bad">작업일보 없음</span>' : ''}${e.carried ? '<span class="tag">이전 달 기록 포함</span>' : ''}${esc(e.kind)}</td></tr>`).join('') +
+      `<tr class="avg"><td>합계</td><td></td><td class="n">${f0(g.list.reduce((s, e) => s + e.fuel, 0))}</td><td></td><td class="n">${f0(g.list.reduce((s, e) => s + e.supply, 0))}</td><td></td><td class="n">${f1(g.list.reduce((s, e) => s + e.hours, 0))}</td><td class="n">${f0(g.list.reduce((s, e) => s + e.rental, 0))}</td><td></td><td></td></tr></tbody>`;
+    const pad = (n) => String(n).padStart(2, '0');
+    $('dailyTable').innerHTML = `<thead><tr><th>일자</th><th class="n">기름값</th>${g.list.map((e) => `<th colspan="2">${esc(e.header)}</th>`).join('')}</tr>` +
+      `<tr><th></th><th></th>${g.list.map(() => '<th class="n">L</th><th class="n">h</th>').join('')}</tr></thead><tbody>` +
+      g.timeline.map((t) => { const k = `${pad(t.m)}-${pad(t.d)}`; return `<tr><td class="${t.own ? '' : 'other'}">${t.own ? t.d : t.label}</td><td class="n">${f0(g.priceByDay[k])}</td>` +
+        g.list.map((e) => { const v = e.days.get(k); return `<td class="n">${v && v.q ? f0(v.q) : ''}</td><td class="n">${v && v.h ? f1(v.h) : ''}</td>`; }).join('') + '</tr>'; }).join('') + '</tbody>';
+  }
+
+  function renderBill() {
+    const m = state.model;
+    const rows = m.groups.flatMap((g) => g.list.map((e) => ({ g, e })));
+    const tot = (k) => rows.reduce((s, x) => s + (x.e[k] || 0), 0);
+    $('billTable').innerHTML = `<thead><tr><th>월</th><th>업체(차량번호)</th><th>장비명</th><th>구분</th><th class="n">사용시간</th><th class="n">시간당 단가</th><th class="n">시간×단가</th><th class="n">작업일보 금액</th><th class="n">고정 가산금</th><th class="n">유류 공급가액</th></tr></thead><tbody>` +
+      rows.map(({ g, e }) => `<tr><td>${esc(g.label)}</td><td>${esc(e.header)}</td><td>${esc(e.cls)}</td><td>${esc(e.kind)}</td><td class="n">${f1(e.hours)}</td><td class="n">${f0(e.rate)}</td><td class="n">${f0(e.rental)}</td><td class="n">${f0(e.billed)}</td><td class="n">${Math.abs(e.addon) >= 1 ? `<span class="pill p-warn">${f0(e.addon)}</span>` : ''}</td><td class="n">${f0(e.supply)}</td></tr>`).join('') +
+      `<tr class="avg"><td>합계</td><td></td><td></td><td></td><td class="n">${f1(tot('hours'))}</td><td></td><td class="n">${f0(tot('rental'))}</td><td class="n">${f0(tot('billed'))}</td><td class="n">${f0(tot('addon'))}</td><td class="n">${f0(tot('supply'))}</td></tr></tbody>`;
+  }
+
+  function renderCheck() {
+    const m = state.model;
+    const opts = ['전체', '과다', '과소', '확인'];
+    const pick = (k) => m.fills.filter((f) => k === '전체' || f.judge === k);
+    $('fillFilter').innerHTML = opts.map((k) => `<button type="button" class="chip" data-f="${k}" aria-pressed="${state.fillFilter === k}">${k} ${pick(k).length}</button>`).join('');
+    const list = pick(state.fillFilter);
+    const lab = (t) => `${t.m}/${t.d}`;
+    $('fillTable').innerHTML = list.length ? `<thead><tr><th>판정</th><th>월</th><th>기종</th><th>업체(차량번호)</th><th>구간</th><th class="n">주유량(L)</th><th class="n">작업시간(h)</th><th class="n">구간 L/h</th><th class="n">기종 평균</th><th class="n">평균 대비</th><th>표시</th></tr></thead><tbody>` +
+      list.map((f) => `<tr><td><span class="pill ${JUDGE[f.judge]}">${f.judge}</span></td><td>${esc(f.group.label)}</td><td>${esc(f.e.cls)}</td><td>${esc(f.e.header)}</td>` +
+        `<td class="num">${f.from === f.to ? lab(f.to) : `${lab(f.from)}~${lab(f.to)}`}${f.carry ? `<span class="muted"> +전월 ${f1(f.carry)}h</span>` : ''}</td><td class="n">${f0(f.fuel)}</td><td class="n">${f1(f.hours)}</td>` +
+        `<td class="n"><b>${f.lph == null ? '–' : f1(f.lph)}</b></td><td class="n">${f1(f.base)}</td><td class="n">${f.ratio == null ? '–' : Math.round(f.ratio * 100) + '%'}</td><td>${f.tags.map((t) => `<span class="tag">${esc(t)}</span>`).join('')}</td></tr>`).join('') + '</tbody>'
+      : '<tbody><tr><td class="muted">해당하는 주유 구간이 없습니다.</td></tr></tbody>';
+    const lo = [['all', '전체'], ['error', '오류'], ['warn', '주의'], ['info', '참고']];
+    $('issueFilter').innerHTML = lo.map(([k, t]) => `<button type="button" class="chip" data-l="${k}" aria-pressed="${state.issueFilter === k}">자료 확인 · ${t} ${k === 'all' ? m.issues.length : m.issues.filter((i) => i.level === k).length}</button>`).join('');
+    const il = m.issues.filter((i) => state.issueFilter === 'all' || i.level === state.issueFilter);
+    $('issueList').innerHTML = il.length ? il.map((i) => `<article class="issue ${i.level}"><div><span class="meta"><span class="pill ${LEVEL[i.level][0]}">${LEVEL[i.level][1]}</span><code>${esc(i.where)}</code></span><strong>${esc(i.title)}</strong><p>${esc(i.detail)}</p></div></article>`).join('')
+      : '<p class="muted">해당하는 항목이 없습니다.</p>';
+  }
+
+  // ---------- export
+  async function doExport() {
+    const m = state.model;
+    if (!m || !downloads) return;
+    const btn = $('exportBtn');
+    btn.disabled = true; btn.textContent = '엑셀 만드는 중…';
+    try {
+      const data = await G.buildWorkbook(ExcelJS, JSZip, m);
+      const months = m.groups.length > 1 ? `${m.groups[0].label}~${m.groups[m.groups.length - 1].m}월` : m.groups[0].label;
+      const safe = (s) => String(s).replace(/[\\/:*?"<>|]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 60);
+      await downloads.save({ filename: `${safe(m.site)} 유류대 및 장비비 대조표 (${safe(months)}).xlsx`, data });
+      showMsg('대조표 엑셀을 저장했습니다.');
+    } catch (e) {
+      const code = e && e.code;
+      if (code === 'declined') showMsg('');
+      else if (code === 'rate_limited') showMsg('저장 창이 이미 열려 있습니다. 잠시 후 다시 누르세요.', true);
+      else if (['unavailable', 'not_granted', 'capability_disabled', 'capability_removed'].includes(code)) { downloads = null; showMsg('이 화면에서는 파일 저장을 쓸 수 없습니다.', true); }
+      else showMsg('엑셀을 만들지 못했습니다: ' + (e && e.message ? e.message : e), true);
+    } finally { btn.textContent = '대조표 엑셀 만들기'; renderSteps(); }
+  }
+
+  // ---------- events
+  $('file').addEventListener('change', (e) => { if (e.target.files.length) addFiles(e.target.files); e.target.value = ''; });
+  $('sampleBtn').addEventListener('click', loadSample);
+  const drop = $('drop');
+  ['dragenter', 'dragover'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach((t) => drop.addEventListener(t, (e) => { e.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', (e) => { if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files); });
+  $('flist').addEventListener('click', (e) => { const b = e.target.closest('[data-rm]'); if (b) { state.books.splice(+b.dataset.rm, 1); recompute(); } });
+  $('site').addEventListener('input', (e) => { state.opts.site = e.target.value.trim(); if (state.model) { state.model.site = state.opts.site || state.input.site || '현장'; $('siteName').textContent = state.model.site; } });
+  $('merge').addEventListener('change', (e) => { state.opts.merge = e.target.checked; recompute(); });
+  $('alias').addEventListener('change', (e) => { const s = e.target.closest('[data-alias]'); if (s && s.value) { state.opts.alias = { ...state.opts.alias, [s.dataset.alias]: s.value }; recompute(); } });
+  $('alias').addEventListener('click', (e) => { const b = e.target.closest('[data-unalias]'); if (b) { const a = { ...state.opts.alias }; delete a[b.dataset.unalias]; state.opts.alias = a; recompute(); } });
+  $('uL').addEventListener('click', () => { state.unit = 'L/h'; render(); });
+  $('uW').addEventListener('click', () => { state.unit = '원/h'; render(); });
+  $('monthChips').addEventListener('click', (e) => { const b = e.target.closest('[data-month]'); if (b) { state.month = b.dataset.month; renderMonth(); } });
+  $('fillFilter').addEventListener('click', (e) => { const b = e.target.closest('[data-f]'); if (b) { state.fillFilter = b.dataset.f; renderCheck(); } });
+  $('issueFilter').addEventListener('click', (e) => { const b = e.target.closest('[data-l]'); if (b) { state.issueFilter = b.dataset.l; renderCheck(); } });
+  $('exportBtn').addEventListener('click', doExport);
+  const tabs = [...document.querySelectorAll('.tab')];
+  function selectTab(t) {
+    tabs.forEach((x) => { const on = x === t; x.setAttribute('aria-selected', on); x.tabIndex = on ? 0 : -1; $(x.getAttribute('aria-controls')).hidden = !on; });
+    try { localStorage.setItem('fuelGenTab', t.id); } catch (e) {}
+  }
+  tabs.forEach((t, i) => {
+    t.addEventListener('click', () => selectTab(t));
+    t.addEventListener('keydown', (e) => {
+      if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+      const n = tabs[(i + (e.key === 'ArrowRight' ? 1 : tabs.length - 1)) % tabs.length]; selectTab(n); n.focus();
+    });
+  });
+  try { const s = localStorage.getItem('fuelGenTab'); if (s && $(s)) selectTab($(s)); } catch (e) {}
+  const rer = () => { if (state.model) renderAvg(); };
+  window.matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', rer);
+  new MutationObserver(rer).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  const browserDownloads = { save: async ({ filename, data }) => {
+    const blob = new Blob([data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+    return { status: 'saved' };
+  } };
+  if (window.claude && typeof window.claude.use === 'function') {
+    window.claude.use('downloads').then((d) => { downloads = d; renderSteps(); }).catch(() => {});
+  } else { downloads = browserDownloads; }
+  loadSample();
+})();
+</script>
+
+</body>
+</html>
