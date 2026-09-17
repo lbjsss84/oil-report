@@ -230,7 +230,7 @@ td.other{color:var(--accent-ink)}
       <h2 id="h-s3"><b>3</b>대조표 엑셀 받기</h2>
       <ul class="outlist" id="outlist"><li>원자료를 올리면 만들 시트가 여기에 표시됩니다.</li></ul>
       <button class="btn primary big" type="button" id="exportBtn" disabled>대조표 엑셀 만들기</button>
-      <p class="help" id="exportHelp">수식이 살아 있는 엑셀로 만듭니다. 그래프는 "장비별 평균" 시트에 들어갑니다.</p>
+      <p class="help" id="exportHelp">수식이 살아 있는 엑셀로 만듭니다. A4 인쇄 설정(쪽 나눔 · 머리글 · 쪽 번호)까지 들어갑니다.</p>
     </section>
   </div>
 
@@ -611,8 +611,9 @@ td.other{color:var(--accent-ink)}
             if (lph === null) tags.push('작업 전 주유');
             else if (ratio > 1.5) judge = '과다';
             else if (ratio < 0.6 && acc >= 8) judge = '과소';
-            if (judge || tags.length)
-              fills.push({ group: g, e, from: seq[startIdx].t, to: x.t, fuel: x.v.q, hours: acc, carry: startIdx === 0 ? carry : 0, lph, base, ratio, judge: judge || '확인', tags });
+            const rec = { group: g, e, from: seq[startIdx].t, to: x.t, fuel: x.v.q, hours: acc, carry: startIdx === 0 ? carry : 0, lph, base, ratio, judge: judge || (tags.length ? '확인' : '정상'), tags };
+            (e.intervals = e.intervals || []).push(rec);
+            if (judge || tags.length) fills.push(rec);
             acc = 0; startIdx = i + 1; first = false;
           }
         });
@@ -660,34 +661,66 @@ td.other{color:var(--accent-ink)}
   const colName = (n) => { let s = ''; n++; while (n) { const m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; };
   const PALETTE = ['1F5F8B', 'E08E0B', '2E8B57', '8E44AD', 'C0392B', '16A085', '7F8C8D', 'D35400', '2C3E50', 'B7950B'];
 
-  function lineChartXml({ title, sheet, catRef, cats, series, numFmt }) {
-    const q = `'${sheet.replace(/'/g, "''")}'`;
-    const ser = series.map((s, i) => {
+  // 공휴일 (대체·임시 포함). 목록에 없는 해는 날짜가 고정된 공휴일만 표시
+  const HOLIDAYS = new Set((
+    '2024-01-01 2024-02-09 2024-02-10 2024-02-11 2024-02-12 2024-03-01 2024-04-10 2024-05-05 2024-05-06 2024-05-15 2024-06-06 2024-08-15 2024-09-16 2024-09-17 2024-09-18 2024-10-01 2024-10-03 2024-10-09 2024-12-25 ' +
+    '2025-01-01 2025-01-27 2025-01-28 2025-01-29 2025-01-30 2025-03-01 2025-03-03 2025-05-05 2025-05-06 2025-06-03 2025-06-06 2025-08-15 2025-10-03 2025-10-05 2025-10-06 2025-10-07 2025-10-08 2025-10-09 2025-12-25 ' +
+    '2026-01-01 2026-02-16 2026-02-17 2026-02-18 2026-03-01 2026-03-02 2026-05-05 2026-05-24 2026-05-25 2026-06-03 2026-06-06 2026-07-17 2026-08-15 2026-08-17 2026-09-24 2026-09-25 2026-09-26 2026-10-03 2026-10-05 2026-10-09 2026-12-25'
+  ).split(' '));
+  const FIXED_HOL = ['01-01', '03-01', '05-05', '06-06', '08-15', '10-03', '10-09', '12-25'];
+  function dayInfo(y, m, d) {
+    const w = new Date(y, m - 1, d).getDay();
+    const md = `${pad2(m)}-${pad2(d)}`;
+    const listed = y >= 2024 && y <= 2026;
+    const hol = listed ? HOLIDAYS.has(`${y}-${md}`) : (FIXED_HOL.includes(md) || (y > 2026 && md === '07-17'));
+    return { w, wk: '일월화수목금토'[w], hol, off: w === 0 || hol, sat: w === 6 && !hol };
+  }
+
+  // ---- 그래프 XML (막대·꺾은선, 보조축)
+  const txPr = (sz, color = '595959', b = 0) => `<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="${sz}" b="${b}"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="ko-KR"/></a:p></c:txPr>`;
+  const dLblsXml = (fmt, color, pos) => `<c:dLbls><c:numFmt formatCode="${esc(fmt)}" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr>${txPr(800, color, 1)}<c:dLblPos val="${pos}"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>`;
+  const axTitle = (t) => (t ? `<c:title><c:tx><c:rich><a:bodyPr rot="0" vert="horz"/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="800" b="0"/></a:pPr><a:r><a:rPr lang="ko-KR" altLang="en-US" sz="800" b="0"/><a:t>${esc(t)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>` : '');
+
+  function chartXml(o) {
+    const q = `'${o.sheet.replace(/'/g, "''")}'`;
+    const cat = `<c:cat><c:strRef><c:f>${q}!${o.catRef}</c:f><c:strCache><c:ptCount val="${o.cats.length}"/>${o.cats.map((c, j) => `<c:pt idx="${j}"><c:v>${esc(c)}</c:v></c:pt>`).join('')}</c:strCache></c:strRef></c:cat>`;
+    let idx = 0;
+    const one = (s, type) => {
+      const i = idx++;
       const color = s.color || PALETTE[i % PALETTE.length];
+      const tx = `<c:tx><c:strRef><c:f>${q}!${s.nameRef}</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(s.name)}</c:v></c:pt></c:strCache></c:strRef></c:tx>`;
       const pts = s.values.map((v, j) => (v === null || v === undefined ? '' : `<c:pt idx="${j}"><c:v>${v}</c:v></c:pt>`)).join('');
-      return `<c:ser><c:idx val="${i}"/><c:order val="${i}"/>` +
-        `<c:tx><c:strRef><c:f>${q}!${s.nameRef}</c:f><c:strCache><c:ptCount val="1"/><c:pt idx="0"><c:v>${esc(s.name)}</c:v></c:pt></c:strCache></c:strRef></c:tx>` +
-        `<c:spPr><a:ln w="${s.avg ? 31750 : 22225}" cap="rnd"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${s.avg ? '<a:prstDash val="dash"/>' : ''}<a:round/></a:ln></c:spPr>` +
-        `<c:marker><c:symbol val="${s.avg ? 'none' : 'circle'}"/>${s.avg ? '' : `<c:size val="6"/><c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:ln></c:spPr>`}</c:marker>` +
-        (s.avg ? `<c:dLbls><c:numFmt formatCode="${esc(numFmt)}" sourceLinked="0"/><c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr><c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="800" b="1"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="ko-KR"/></a:p></c:txPr><c:dLblPos val="t"/><c:showLegendKey val="0"/><c:showVal val="1"/><c:showCatName val="0"/><c:showSerName val="0"/><c:showPercent val="0"/><c:showBubbleSize val="0"/></c:dLbls>` : '') +
-        `<c:cat><c:strRef><c:f>${q}!${catRef}</c:f><c:strCache><c:ptCount val="${cats.length}"/>${cats.map((c, j) => `<c:pt idx="${j}"><c:v>${esc(c)}</c:v></c:pt>`).join('')}</c:strCache></c:strRef></c:cat>` +
-        `<c:val><c:numRef><c:f>${q}!${s.valRef}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${s.values.length}"/>${pts}</c:numCache></c:numRef></c:val>` +
-        `<c:smooth val="0"/></c:ser>`;
-    }).join('');
-    const axTxt = '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="900"><a:solidFill><a:srgbClr val="595959"/></a:solidFill></a:defRPr></a:pPr><a:endParaRPr lang="ko-KR"/></a:p></c:txPr>';
+      const val = `<c:val><c:numRef><c:f>${q}!${s.valRef}</c:f><c:numCache><c:formatCode>General</c:formatCode><c:ptCount val="${s.values.length}"/>${pts}</c:numCache></c:numRef></c:val>`;
+      if (type === 'bar')
+        return `<c:ser><c:idx val="${i}"/><c:order val="${i}"/>${tx}<c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln><a:noFill/></a:ln></c:spPr><c:invertIfNegative val="0"/>${s.labels ? dLblsXml(s.labels, '404040', 'outEnd') : ''}${cat}${val}</c:ser>`;
+      const w = s.avg ? 31750 : (s.width || 22225);
+      const marker = s.avg || s.noMarker ? '<c:marker><c:symbol val="none"/></c:marker>'
+        : `<c:marker><c:symbol val="circle"/><c:size val="${s.markerSize || 6}"/><c:spPr><a:solidFill><a:srgbClr val="${color}"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill></a:ln></c:spPr></c:marker>`;
+      return `<c:ser><c:idx val="${i}"/><c:order val="${i}"/>${tx}<c:spPr><a:ln w="${w}" cap="rnd"><a:solidFill><a:srgbClr val="${color}"/></a:solidFill>${s.avg ? '<a:prstDash val="dash"/>' : ''}<a:round/></a:ln></c:spPr>${marker}${s.labels ? dLblsXml(s.labels, color, 't') : ''}${cat}${val}<c:smooth val="0"/></c:ser>`;
+    };
+    const bars = (o.bars || []).map((s) => one(s, 'bar')).join('');
+    const lines = (o.lines || []).map((s) => one(s, 'line')).join('');
+    const sec = !!(bars && lines && o.secondary);
+    const skip = o.skip && o.skip > 1 ? `<c:tickLblSkip val="${o.skip}"/><c:tickMarkSkip val="${o.skip}"/>` : '';
+    const catAx = (id, cross, del) => `<c:catAx><c:axId val="${id}"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="${del ? 1 : 0}"/><c:axPos val="b"/><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF"/></a:solidFill></a:ln></c:spPr>${txPr(800)}<c:crossAx val="${cross}"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/>${del ? '' : skip}<c:noMultiLvlLbl val="0"/></c:catAx>`;
+    const valAx = (id, cross, fmt, right, grid, title) => `<c:valAx><c:axId val="${id}"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="${right ? 'r' : 'l'}"/>${grid ? '<c:majorGridlines><c:spPr><a:ln w="6350"><a:solidFill><a:srgbClr val="E3E3E3"/></a:solidFill></a:ln></c:spPr></c:majorGridlines>' : ''}${axTitle(title)}<c:numFmt formatCode="${esc(fmt)}" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${txPr(800)}<c:crossAx val="${cross}"/><c:crosses val="${right ? 'max' : 'autoZero'}"/><c:crossBetween val="between"/></c:valAx>`;
+    let plot = '';
+    if (bars) plot += `<c:barChart><c:barDir val="col"/><c:grouping val="clustered"/><c:varyColors val="0"/>${bars}<c:gapWidth val="${o.gap ?? 60}"/><c:overlap val="${o.overlap ?? -10}"/><c:axId val="501"/><c:axId val="502"/></c:barChart>`;
+    if (lines) plot += `<c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${lines}<c:marker val="1"/><c:axId val="${sec ? 503 : 501}"/><c:axId val="${sec ? 504 : 502}"/></c:lineChart>`;
+    let axes = catAx(501, 502, false) + valAx(502, 501, o.numFmt || '#,##0', false, true, o.yTitle);
+    if (sec) axes += catAx(503, 504, true) + valAx(504, 503, o.numFmt2 || '#,##0', true, false, o.y2Title);
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><c:roundedCorners val="0"/><c:chart>` +
-      `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1200" b="1"/></a:pPr><a:r><a:rPr lang="ko-KR" altLang="en-US" sz="1200" b="1"/><a:t>${esc(title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>` +
-      `<c:autoTitleDeleted val="0"/><c:plotArea><c:layout/><c:lineChart><c:grouping val="standard"/><c:varyColors val="0"/>${ser}<c:marker val="1"/><c:axId val="50010001"/><c:axId val="50010002"/></c:lineChart>` +
-      `<c:catAx><c:axId val="50010001"/><c:scaling><c:orientation val="minMax"/></c:scaling><c:delete val="0"/><c:axPos val="b"/><c:numFmt formatCode="General" sourceLinked="1"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln w="9525"><a:solidFill><a:srgbClr val="BFBFBF"/></a:solidFill></a:ln></c:spPr>${axTxt}<c:crossAx val="50010002"/><c:crosses val="autoZero"/><c:auto val="1"/><c:lblAlgn val="ctr"/><c:lblOffset val="100"/><c:noMultiLvlLbl val="0"/></c:catAx>` +
-      `<c:valAx><c:axId val="50010002"/><c:scaling><c:orientation val="minMax"/><c:min val="0"/></c:scaling><c:delete val="0"/><c:axPos val="l"/><c:majorGridlines><c:spPr><a:ln w="6350"><a:solidFill><a:srgbClr val="E3E3E3"/></a:solidFill></a:ln></c:spPr></c:majorGridlines><c:numFmt formatCode="${esc(numFmt)}" sourceLinked="0"/><c:majorTickMark val="none"/><c:minorTickMark val="none"/><c:tickLblPos val="nextTo"/><c:spPr><a:ln><a:noFill/></a:ln></c:spPr>${axTxt}<c:crossAx val="50010001"/><c:crosses val="autoZero"/><c:crossBetween val="between"/></c:valAx>` +
-      `<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr></c:plotArea><c:legend><c:legendPos val="b"/><c:overlay val="0"/>${axTxt}</c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>` +
+      `<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1100" b="1"/></a:pPr><a:r><a:rPr lang="ko-KR" altLang="en-US" sz="1100" b="1"/><a:t>${esc(o.title)}</a:t></a:r></a:p></c:rich></c:tx><c:overlay val="0"/></c:title>` +
+      `<c:autoTitleDeleted val="0"/><c:plotArea><c:layout/>${plot}${axes}<c:spPr><a:noFill/><a:ln><a:noFill/></a:ln></c:spPr></c:plotArea>` +
+      `<c:legend><c:legendPos val="b"/><c:overlay val="0"/>${txPr(800)}</c:legend><c:plotVisOnly val="1"/><c:dispBlanksAs val="gap"/></c:chart>` +
       `<c:spPr><a:solidFill><a:srgbClr val="FFFFFF"/></a:solidFill><a:ln w="9525"><a:solidFill><a:srgbClr val="D9D9D9"/></a:solidFill></a:ln></c:spPr>` +
       `<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr><a:latin typeface="맑은 고딕"/><a:ea typeface="맑은 고딕"/></a:defRPr></a:pPr><a:endParaRPr lang="ko-KR"/></a:p></c:txPr></c:chartSpace>`;
   }
 
   function drawingXml(anchors) {
-    const a = anchors.map((x, i) => `<xdr:twoCellAnchor editAs="oneCell"><xdr:from><xdr:col>${x.c1}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${x.r1}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from><xdr:to><xdr:col>${x.c2}</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>${x.r2}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
+    const E = 9525;
+    const a = anchors.map((x, i) => `<xdr:twoCellAnchor editAs="oneCell"><xdr:from><xdr:col>${x.c1}</xdr:col><xdr:colOff>${Math.round((x.o1 || 0) * E)}</xdr:colOff><xdr:row>${x.r1}</xdr:row><xdr:rowOff>${Math.round((x.ro1 || 0) * E)}</xdr:rowOff></xdr:from><xdr:to><xdr:col>${x.c2}</xdr:col><xdr:colOff>${Math.round((x.o2 || 0) * E)}</xdr:colOff><xdr:row>${x.r2}</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>` +
       `<xdr:graphicFrame macro=""><xdr:nvGraphicFramePr><xdr:cNvPr id="${i + 2}" name="차트 ${i + 1}"/><xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr><xdr:xfrm><a:off x="0" y="0"/><a:ext cx="0" cy="0"/></xdr:xfrm>` +
       `<a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/chart"><c:chart xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" r:id="rId${i + 1}"/></a:graphicData></a:graphic></xdr:graphicFrame><xdr:clientData/></xdr:twoCellAnchor>`).join('');
     return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<xdr:wsDr xmlns:xdr="http://schemas.openxmlformats.org/drawingml/2006/spreadsheetDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">${a}</xdr:wsDr>`;
@@ -701,7 +734,9 @@ td.other{color:var(--accent-ink)}
     const thin = { style: 'thin', color: { argb: 'FFA6A6A6' } };
     const BORDER = { top: thin, left: thin, bottom: thin, right: thin };
     const fill = (argb) => ({ type: 'pattern', pattern: 'solid', fgColor: { argb } });
-    const HEAD = fill('FFDCE6F1'), SUB = fill('FFF2F2F2'), TOTAL = fill('FFFFF2CC'), YEL = fill('FFFFFF00');
+    const HEAD = fill('FFDCE6F1'), SUB = fill('FFF2F2F2'), TOTAL = fill('FFFFF2CC'), YEL = fill('FFFFFF00'), OFF = fill('FFFCEDED'), BAR = fill('FF1F4E79');
+    const JUDGE_FILL = { '과다': fill('FFF8CBAD'), '과소': fill('FFDDEBF7'), '확인': fill('FFF2F2F2') };
+    const RED = 'FFC00000', BLUE = 'FF2F5597', GREY = 'FF7F7F7F', BROWN = 'FF7F6000';
     const setc = (ws, addr, value, style = {}) => {
       const c = ws.getCell(addr);
       c.value = value;
@@ -709,58 +744,143 @@ td.other{color:var(--accent-ink)}
       if (style.fill) c.fill = style.fill;
       if (style.border !== false) c.border = BORDER;
       if (style.numFmt) c.numFmt = style.numFmt;
-      c.alignment = { vertical: 'middle', horizontal: style.align || 'center', wrapText: !!style.wrap };
+      c.alignment = { vertical: 'middle', horizontal: style.align || (style.numFmt ? 'right' : 'center'), wrapText: !!style.wrap };
       return c;
     };
+    // 병합: 스타일을 먼저 넣고 병합해야 테두리가 전체에 그려짐
+    const mset = (ws, range, value, style = {}) => { const c = setc(ws, range.split(':')[0], value, style); ws.mergeCells(range); return c; };
+    const note = (ws, range, text) => mset(ws, range, text, { border: false, align: 'left', font: { size: 9, color: { argb: GREY } } });
+    const label = (ws, addr, text, size = 11) => setc(ws, addr, text, { border: false, align: 'left', font: { size, bold: true, color: { argb: 'FF1F4E79' } } });
     const F = (formula, result) => ({ formula, result: result === undefined || result === null || (typeof result === 'number' && !isFinite(result)) ? undefined : result });
-    const N0 = '#,##0_);[Red]\\(#,##0\\);-', N1 = '#,##0.0_);[Red]\\(#,##0.0\\);-', PCT = '0.0%';
+    const N0 = '#,##0_);[Red]\\(#,##0\\);-', N1 = '#,##0.0_);[Red]\\(#,##0.0\\);-', PCT = '0.0%', P0 = '0%';
+    const DAYS = '0"일"', TIMES = '0"회"';
+    const ratioRules = (ref, top) => [
+      { type: 'expression', priority: 1, formulae: [`AND(ISNUMBER(${top}),${top}>=1.3)`], style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFF8CBAD' } }, font: { color: { argb: 'FF9C0006' }, bold: true } } },
+      { type: 'expression', priority: 2, formulae: [`AND(ISNUMBER(${top}),${top}<=0.7)`], style: { fill: { type: 'pattern', pattern: 'solid', bgColor: { argb: 'FFDDEBF7' } }, font: { color: { argb: 'FF1F4E79' }, bold: true } } },
+    ];
+    const ratioCF = (ws, col, r1, r2) => { if (r2 >= r1) ws.addConditionalFormatting({ ref: `${col}${r1}:${col}${r2}`, rules: ratioRules(`${col}${r1}`) }); };
     const site = model.site || '현장';
-    const charts = [];
+    const now = opts.today ? new Date(opts.today) : new Date();
+    const today = `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+    const charts = [];      // { host, anchor, xml }
+    const colBreaks = {};   // 시트명 -> [열 번호(0부터)]
+    const q = (name) => `'${name.replace(/'/g, "''")}'!`;
+    const groups = model.groups;
+    const period = groups.length ? (groups.length > 1 ? `${groups[0].label} ~ ${groups[groups.length - 1].label}` : groups[0].label) : '';
 
-    // ---- 장비별 평균 (첫 시트)
+    // ---- 인쇄 설정
+    const LAND = { w: 1045, h: 500 }, PORT = { w: 717, h: 745 };
+    const pxOf = (w) => Math.floor((w === undefined ? 9 : w) * 7 + 5);
+    const widthPx = (ws, c1, c2) => { let s = 0; for (let c = c1; c <= c2; c++) s += pxOf(ws.getColumn(c + 1).width); return s; };
+    const heightPt = (ws, r1, r2) => { let s = 0; for (let r = r1; r <= r2; r++) s += ws.getRow(r).height || 15; return s; };
+    const fitScale = (av, needW, needH, floor = 45) => Math.max(floor, Math.min(100, Math.floor(Math.min(av.w / needW, av.h / needH) * 97)));
+    const hfText = (s) => txt(s).replace(/&/g, '&&');
+    const page = (ws, o) => {
+      ws.pageSetup = {
+        paperSize: 9, orientation: o.land ? 'landscape' : 'portrait', horizontalCentered: true,
+        margins: { left: 0.4, right: 0.4, top: 0.65, bottom: 0.6, header: 0.3, footer: 0.3 },
+        ...(o.fit ? { fitToPage: true, fitToWidth: 1, fitToHeight: o.fitH === undefined ? 0 : o.fitH } : { fitToPage: false, scale: o.scale || 100 }),
+        ...(o.area ? { printArea: o.area } : {}),
+        ...(o.titles ? { printTitlesRow: o.titles } : {}),
+      };
+      ws.headerFooter = {
+        oddHeader: `&L&"맑은 고딕,Bold"&9 ${hfText(site)}&R&"맑은 고딕,Regular"&8 ${hfText(ws.name)}`,
+        oddFooter: `&L&"맑은 고딕,Regular"&8 작성일 ${today}&C&"맑은 고딕,Regular"&8 &P / &N&R&"맑은 고딕,Regular"&8 유류대 및 장비비 대조표`,
+      };
+    };
+    // 가로 픽셀 x 위치 → (열, 열 안 오프셋)
+    const colAt = (ws, x) => { let c = 0; for (;;) { const w = pxOf(ws.getColumn(c + 1).width); if (x < w || c > 200) return { c, o: x }; x -= w; c++; } };
+
+    // ---- 시트 순서
+    const coverWs = wb.addWorksheet('총괄 요약', { views: [{ showGridLines: false }] });
     const avgWs = wb.addWorksheet('장비별 평균', { views: [{ showGridLines: false }] });
-    const groupSheets = {};
-    const summaryRowOf = new Map();
+    const monthWs = groups.map((g) => wb.addWorksheet(`${String(g.y).slice(2)}년 ${g.m}월`, { views: [{ state: 'frozen', xSplit: 14, ySplit: 3 }] }));
+    const cardWs = wb.addWorksheet('장비별 상세', { views: [{ showGridLines: false }] });
+    const bw = wb.addWorksheet('작업일보 청구 대조', { views: [{ state: 'frozen', ySplit: 2, showGridLines: false }] });
+    const cw = wb.addWorksheet('점검 결과', { views: [{ showGridLines: false }] });
+    const sw = wb.addWorksheet('읽은 자료', { views: [{ showGridLines: false }] });
+    const dataWs = wb.addWorksheet('그래프 자료');
+    dataWs.state = 'hidden';
 
-    // ---- 월별 대조표
-    for (const g of model.groups) {
-      const name = `${String(g.y).slice(2)}년 ${g.m}월`;
-      groupSheets[g.key] = name;
-      const ws = wb.addWorksheet(name, { views: [{ state: 'frozen', xSplit: 14, ySplit: 3, showGridLines: true }] });
-      const E = g.list;
-      const n = g.timeline.length;
-      const first = 4, last = first + n - 1, totR = last + 1, supR = last + 2;
-      ws.mergeCells('A1:I1');
-      setc(ws, 'A1', `${name} ${site} 유류대 및 장비비 대조표`, { font: { size: 14, bold: true }, align: 'left', border: false });
+    // ================================================================ 월별 대조표 (원래 양식)
+    const KNW = [6.5, 7.5, 7, 7.5], EQW = [8.5, 12, 8, 13], DATEW = 7.5;
+    const monthInfo = {};
+    const classAvgRef = []; // 장비별 평균 시트 완성 후 채울 칸
+    groups.forEach((g, gi) => {
+      const ws = monthWs[gi];
+      const name = ws.name;
+      const E = g.list, n = E.length, T = g.timeline, nd = T.length;
+      const first = 4, last = first + nd - 1, totR = last + 1, supR = last + 2;
+      const sumR = 3 + n, noteR = 5 + n, cmpT = 8 + n, cmpH = 9 + n, cmp0 = 10 + n, cmpEnd = 9 + 2 * n, cmpNote = 10 + 2 * n;
+      const bottom = Math.max(supR, cmpNote);
+      // 한 장에 장비 P대씩
+      const eqPx = EQW.reduce((s, w) => s + pxOf(w), 0), knPx = KNW.reduce((s, w) => s + pxOf(w), 0);
+      const estH = 34 + 32 + 18 + (bottom - 3) * (nd > 40 ? 14 : 15);
+      const sH = LAND.h / estH;               // 한 장에 세로로 다 들어가는 배율
+      const base = sH >= 0.6 ? Math.min(sH, 0.8) : 0.75; // 너무 길면 세로로 나누고(제목행 반복) 글씨 크기를 지킴
+      let P = Math.max(1, Math.min(6, n));
+      while (P > 1 && LAND.w / (knPx + P * eqPx) < base) P--;
+      if (n) P = Math.ceil(n / Math.ceil(n / P)); // 쪽마다 대수를 고르게
+      const pageOf = (i) => Math.floor(i / P);
+      const c0Of = (i) => 14 + 4 * i + pageOf(i);
+      const dateCols = [];
+      for (let p = 1; p * P < n; p++) dateCols.push(14 + 4 * p * P + (p - 1));
+      const lastCol = n ? c0Of(n - 1) + 3 : 13;
+      const yOf = (t) => (t.m > g.m ? g.y - 1 : g.y);
+
+      [22, 9, 11, 10, 13, 12, 10, 14, 10, 1.5, ...KNW].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      E.forEach((e, i) => EQW.forEach((w, k) => { ws.getColumn(c0Of(i) + k + 1).width = w; }));
+      dateCols.forEach((c) => { ws.getColumn(c + 1).width = DATEW; });
+      ws.getRow(1).height = 34; ws.getRow(2).height = 32; ws.getRow(3).height = 18;
+      const RH = nd > 40 ? 14 : 15;
+      for (let r = 4; r <= bottom; r++) ws.getRow(r).height = r <= supR ? RH : 15;
+      ws.getRow(totR).height = 16; ws.getRow(supR).height = 16;
+
+      mset(ws, 'A1:I1', `${name} ${site} 유류대 및 장비비 대조표`, { font: { size: 12, bold: true }, align: 'left', border: false, wrap: true });
+      setc(ws, 'K1', `${name} 일별 유류 · 장비 사용 내역`, { font: { size: 12, bold: true }, align: 'left', border: false });
       ['회사명', '장비명', '유류 총 수량', '시간당 유류사용량', '유류 공급가액', '장비 사용 시간 대비 유류사용료', '장비 사용시간', '장비 사용금액', '시간당 사용금액']
-        .forEach((h, i) => setc(ws, `${colName(i)}2`, h, { fill: HEAD, font: { bold: true }, wrap: true }));
-      [['K', '시세 반영율'], ['L', '기름값 시세'], ['M', '기름값'], ['N', '일자']].forEach(([c, h]) => setc(ws, `${c}3`, h, { fill: HEAD, font: { bold: true } }));
+        .forEach((h, i) => setc(ws, `${colName(i)}2`, h, { fill: HEAD, font: { bold: true, size: 9 }, wrap: true }));
+      mset(ws, 'K2:N2', '기름값 · 일자', { fill: HEAD, font: { bold: true } });
+      [['K', '시세 반영율'], ['L', '기름값 시세'], ['M', '기름값'], ['N', '일자']].forEach(([c, h]) => setc(ws, `${c}3`, h, { fill: HEAD, font: { bold: true, size: 9 }, wrap: true }));
+      dateCols.forEach((c) => mset(ws, `${colName(c)}2:${colName(c)}3`, '일자', { fill: HEAD, font: { bold: true } }));
+
+      const days = g.timeline.map((t) => ({ t, info: dayInfo(yOf(t), t.m, t.d) }));
+      const dayLabel = ({ t, info }) => `${t.own ? t.d : `${t.m}/${t.d}`}(${info.wk})`;
+      const dayStyle = ({ t, info }) => ({
+        fill: t.own ? (info.off ? OFF : undefined) : SUB,
+        font: { size: 9, color: { argb: !t.own ? BROWN : info.off ? RED : info.sat ? BLUE : 'FF000000' }, bold: info.off },
+      });
+      const info = { name, sr: new Map(), cmp: new Map(), cols: new Map(), first, days };
+      monthInfo[g.key] = info;
+
       E.forEach((e, i) => {
-        const c0 = 14 + 4 * i;
+        const c0 = c0Of(i);
         const [cq, ca, ch, cr] = [0, 1, 2, 3].map((k) => colName(c0 + k));
         const sr = 3 + i;
-        summaryRowOf.set(`${g.key}|${e.plate}`, sr);
-        ws.mergeCells(`${cq}2:${cr}2`);
-        setc(ws, `${cq}2`, e.header, { fill: HEAD, font: { bold: true } });
-        ['유류 수량', '유류 금액', '장비사용시간', '장비사용금액'].forEach((h, k) => setc(ws, `${colName(c0 + k)}3`, h, { fill: SUB }));
-        g.timeline.forEach((t, j) => {
+        info.sr.set(e.plate, sr);
+        info.cols.set(e.plate, { cq, ch });
+        mset(ws, `${cq}2:${cr}2`, e.header, { fill: HEAD, font: { bold: true }, wrap: true });
+        ['유류 수량', '유류 금액', '장비사용시간', '장비사용금액'].forEach((h, k) => setc(ws, `${colName(c0 + k)}3`, h, { fill: SUB, font: { size: 9 }, wrap: true }));
+        days.forEach((dd, j) => {
           const r = first + j;
-          const v = e.days.get(`${pad2(t.m)}-${pad2(t.d)}`) || { q: 0, a: 0, h: 0 };
-          setc(ws, `${cq}${r}`, v.q || 0, { numFmt: N0 });
-          setc(ws, `${ca}${r}`, v.a || 0, { numFmt: N0 });
-          setc(ws, `${ch}${r}`, v.h || 0, { numFmt: N1 });
-          setc(ws, `${cr}${r}`, F(`$I$${sr}*${ch}${r}`, (v.h || 0) * e.rate), { numFmt: N0 });
+          const v = e.days.get(`${pad2(dd.t.m)}-${pad2(dd.t.d)}`) || { q: 0, a: 0, h: 0 };
+          const f = dd.t.own && dd.info.off ? OFF : undefined;
+          setc(ws, `${cq}${r}`, v.q || 0, { numFmt: N0, fill: f });
+          setc(ws, `${ca}${r}`, v.a || 0, { numFmt: N0, fill: f });
+          setc(ws, `${ch}${r}`, v.h || 0, { numFmt: N1, fill: f });
+          setc(ws, `${cr}${r}`, F(`$I$${sr}*${ch}${r}`, (v.h || 0) * e.rate), { numFmt: N0, fill: f });
         });
-        setc(ws, `${cq}${totR}`, F(`SUM(${cq}${first}:${cq}${last})`, e.fuel), { numFmt: N0, fill: TOTAL, font: { bold: true } });
-        setc(ws, `${ca}${totR}`, F(`SUM(${ca}${first}:${ca}${last})`, e.amount), { numFmt: N0, fill: TOTAL, font: { bold: true } });
-        setc(ws, `${ch}${totR}`, F(`SUM(${ch}${first}:${ch}${last})`, e.hours), { numFmt: N1, fill: TOTAL, font: { bold: true } });
-        setc(ws, `${cr}${totR}`, ' - ', { fill: TOTAL });
-        setc(ws, `${cq}${supR}`, ' - ', { fill: TOTAL });
-        setc(ws, `${ca}${supR}`, F(`${ca}${totR}/1.1`, e.supply), { numFmt: N0, fill: TOTAL, font: { bold: true } });
-        setc(ws, `${ch}${supR}`, ' - ', { fill: TOTAL });
-        setc(ws, `${cr}${supR}`, F(`SUM(${cr}${first}:${cr}${last})`, e.hours * e.rate), { numFmt: N0, fill: TOTAL, font: { bold: true } });
+        const T1 = { fill: TOTAL, font: { bold: true } };
+        setc(ws, `${cq}${totR}`, F(`SUM(${cq}${first}:${cq}${last})`, e.fuel), { ...T1, numFmt: N0 });
+        setc(ws, `${ca}${totR}`, F(`SUM(${ca}${first}:${ca}${last})`, e.amount), { ...T1, numFmt: N0 });
+        setc(ws, `${ch}${totR}`, F(`SUM(${ch}${first}:${ch}${last})`, e.hours), { ...T1, numFmt: N1 });
+        setc(ws, `${cr}${totR}`, '-', { fill: TOTAL });
+        setc(ws, `${cq}${supR}`, '-', { fill: TOTAL });
+        setc(ws, `${ca}${supR}`, F(`${ca}${totR}/1.1`, e.supply), { ...T1, numFmt: N0 });
+        setc(ws, `${ch}${supR}`, '-', { fill: TOTAL });
+        setc(ws, `${cr}${supR}`, F(`SUM(${cr}${first}:${cr}${last})`, e.hours * e.rate), { ...T1, numFmt: N0 });
         // 요약행
-        setc(ws, `A${sr}`, F(`${cq}2`, e.header), { fill: YEL });
+        setc(ws, `A${sr}`, F(`${cq}2`, e.header), { fill: YEL, align: 'left' });
         setc(ws, `B${sr}`, e.cls);
         setc(ws, `C${sr}`, F(`${cq}${totR}`, e.fuel), { numFmt: N0 });
         setc(ws, `D${sr}`, F(`IFERROR(C${sr}/G${sr},0)`, e.lph || 0), { numFmt: N1, fill: YEL });
@@ -769,227 +889,730 @@ td.other{color:var(--accent-ink)}
         setc(ws, `G${sr}`, F(`${ch}${totR}`, e.hours), { numFmt: N1 });
         setc(ws, `H${sr}`, F(`${cr}${supR}`, e.hours * e.rate), { numFmt: N0 });
         setc(ws, `I${sr}`, round(e.rate, 0), { numFmt: N0 });
-        ws.getColumn(c0 + 1).width = 9; ws.getColumn(c0 + 2).width = 11; ws.getColumn(c0 + 3).width = 11; ws.getColumn(c0 + 4).width = 12;
+
+        // 기종 평균 대비
+        const r = cmp0 + i;
+        info.cmp.set(e.plate, r);
+        const workDays = [...e.days.values()].filter((v) => v.h > 0).length;
+        const fillCnt = [...e.days.values()].filter((v) => v.q > 0).length;
+        const avg = model.classAvg[e.cls];
+        const ratio = avg && e.lph ? e.lph / avg.lph : null;
+        setc(ws, `A${r}`, F(`A${sr}`, e.header), { align: 'left' });
+        setc(ws, `B${r}`, F(`B${sr}`, e.cls));
+        setc(ws, `C${r}`, F(`COUNTIF(${ch}${first}:${ch}${last},">0")`, workDays), { numFmt: DAYS });
+        setc(ws, `D${r}`, F(`COUNTIF(${cq}${first}:${cq}${last},">0")`, fillCnt), { numFmt: TIMES });
+        setc(ws, `E${r}`, F(`IFERROR(G${sr}/C${r},0)`, workDays ? e.hours / workDays : 0), { numFmt: N1 });
+        setc(ws, `F${r}`, F(`D${sr}`, e.lph || 0), { numFmt: N1 });
+        if (avg) classAvgRef.push({ ws, addr: `G${r}`, cls: e.cls, value: avg.lph, fmt: N1 });
+        else setc(ws, `G${r}`, '-');
+        setc(ws, `H${r}`, F(`IF(OR(F${r}=0,N(G${r})=0),"",F${r}/G${r})`, ratio === null ? '' : ratio), { numFmt: P0 });
+        setc(ws, `I${r}`, F(`IF(H${r}="","",IF(H${r}>=1.3,"▲ 높음",IF(H${r}<=0.7,"▼ 낮음","")))`,
+          ratio === null ? '' : ratio >= 1.3 ? '▲ 높음' : ratio <= 0.7 ? '▼ 낮음' : ''), { font: { size: 9 } });
       });
-      g.timeline.forEach((t, j) => {
+      // 날짜 열
+      days.forEach((dd, j) => {
         const r = first + j;
-        const price = g.priceByDay[`${pad2(t.m)}-${pad2(t.d)}`] || '';
-        setc(ws, `K${r}`, F(`IF(L${r}="","",M${r}/L${r}-1)`), { numFmt: PCT });
-        setc(ws, `L${r}`, null, { numFmt: N0 });
-        setc(ws, `M${r}`, price, { numFmt: N0 });
-        setc(ws, `N${r}`, t.own ? t.d : t.label, { fill: t.own ? undefined : SUB, font: t.own ? {} : { color: { argb: 'FF7F6000' } } });
+        const price = g.priceByDay[`${pad2(dd.t.m)}-${pad2(dd.t.d)}`] || '';
+        const f = dd.t.own && dd.info.off ? OFF : undefined;
+        setc(ws, `K${r}`, F(`IF(L${r}="","",M${r}/L${r}-1)`), { numFmt: PCT, fill: f });
+        setc(ws, `L${r}`, null, { numFmt: N0, fill: f });
+        setc(ws, `M${r}`, price, { numFmt: N0, fill: f });
+        for (const c of ['N', ...dateCols.map(colName)]) setc(ws, `${c}${r}`, dayLabel(dd), dayStyle(dd));
       });
-      setc(ws, `N${totR}`, '총 계', { fill: TOTAL, font: { bold: true } });
-      setc(ws, `N${supR}`, '공급가액', { fill: TOTAL, font: { bold: true } });
-      const noteR = 4 + E.length + 1;
-      ws.mergeCells(`A${noteR}:I${noteR}`);
-      setc(ws, `A${noteR}`, '※ 유류는 경유사용집계표, 사용시간·시간당 단가는 장비작업일보에서 가져왔습니다. 기름값 시세(L열)는 필요할 때 직접 입력하세요.' +
-        (g.timeline.some((t) => !t.own) ? ' 회색 일자(예: 4/20)는 이 달 대장·작업일보에 함께 적힌 이전 달 기록입니다.' : ''),
-        { border: false, align: 'left', font: { size: 9, color: { argb: 'FF7F7F7F' } }, wrap: true });
-      ws.getRow(noteR).height = 30;
-      [16, 9, 11, 11, 13, 13, 11, 13, 11, 2, 9, 10, 9, 7].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-      ws.getRow(2).height = 32;
-    }
-
-    // ---- 장비별 평균 채우기
-    const months = model.groups;
-    const ws = avgWs;
-    setc(ws, 'A1', `${site} 장비별 월 유류사용량 · 시간당 사용량`, { font: { size: 14, bold: true }, align: 'left', border: false });
-    ws.mergeCells('A1:H1');
-    let row = 3;
-    const MC = 9; // J열부터 차트 데이터
-    const chartCol = MC + 1 + months.length + 1;
-    for (const cls of model.classes.concat(Object.keys(model.groups.reduce((o, g) => { g.list.forEach((e) => { if (!model.classAvg[e.cls]) o[e.cls] = 1; }); return o; }, {})))) {
-      const top = row;
-      setc(ws, `A${row}`, '장비명', { fill: HEAD, font: { bold: true } });
-      ws.mergeCells(`B${row}:G${row}`);
-      setc(ws, `B${row}`, cls, { fill: HEAD, font: { bold: true, size: 11 } });
-      row++;
-      ['월', '업체명', '유류 총 사용량', '유류 공급가액', '장비 사용시간', '시간당 유류사용량', '시간 대비 유류사용료'].forEach((h, i) => setc(ws, `${colName(i)}${row}`, h, { fill: SUB, font: { bold: true } }));
-      row++;
-      const first = row;
-      const cellOf = {}; // plate -> groupKey -> row
-      const labels = new Map();
-      const groupRange = {};
-      for (const g of months) {
-        const es = g.list.filter((e) => e.cls === cls);
-        if (!es.length) continue;
-        const r0 = row;
-        const sh = `'${groupSheets[g.key]}'!`;
-        for (const e of es) {
-          const sr = summaryRowOf.get(`${g.key}|${e.plate}`);
-          setc(ws, `B${row}`, F(`${sh}A${sr}`, e.header), { align: 'left' });
-          setc(ws, `C${row}`, F(`${sh}C${sr}`, e.fuel), { numFmt: N0 });
-          setc(ws, `D${row}`, F(`${sh}E${sr}`, e.supply), { numFmt: N0 });
-          setc(ws, `E${row}`, F(`${sh}G${sr}`, e.hours), { numFmt: N1 });
-          setc(ws, `F${row}`, F(`IFERROR(C${row}/E${row},0)`, e.lph || 0), { numFmt: N1 });
-          setc(ws, `G${row}`, F(`IFERROR(D${row}/E${row},0)`, e.wonph || 0), { numFmt: N0 });
-          (cellOf[e.plate] = cellOf[e.plate] || {})[g.key] = { row, lph: e.lph, wonph: e.wonph };
-          if (!labels.has(e.plate)) labels.set(e.plate, e.header);
-          row++;
-        }
-        if (row - 1 > r0) ws.mergeCells(`A${r0}:A${row - 1}`);
-        setc(ws, `A${r0}`, g.short);
-        groupRange[g.key] = [r0, row - 1];
+      for (const c of ['K', 'L', 'M']) { setc(ws, `${c}${totR}`, null, { fill: TOTAL }); setc(ws, `${c}${supR}`, null, { fill: TOTAL }); }
+      for (const c of ['N', ...dateCols.map(colName)]) {
+        setc(ws, `${c}${totR}`, '총 계', { fill: TOTAL, font: { bold: true } });
+        setc(ws, `${c}${supR}`, '공급가액', { fill: TOTAL, font: { bold: true, size: 9 } });
       }
-      const last = row - 1;
-      const C = `C${first}:C${last}`, Dd = `D${first}:D${last}`, Ee = `E${first}:E${last}`;
-      const avg = model.classAvg[cls];
-      setc(ws, `A${row}`, '', { fill: TOTAL });
-      setc(ws, `B${row}`, '평균 (F·G 가중)', { fill: TOTAL, font: { bold: true } });
-      setc(ws, `C${row}`, F(`IFERROR(AVERAGEIF(${C},">0"),0)`), { fill: TOTAL, numFmt: N0, font: { bold: true } });
-      setc(ws, `D${row}`, F(`IFERROR(AVERAGEIF(${C},">0",${Dd}),0)`), { fill: TOTAL, numFmt: N0, font: { bold: true } });
-      setc(ws, `E${row}`, F(`IFERROR(AVERAGEIF(${C},">0",${Ee}),0)`), { fill: TOTAL, numFmt: N1, font: { bold: true } });
-      setc(ws, `F${row}`, F(`IFERROR(SUMIF(${C},">0")/SUMIFS(${Ee},${C},">0"),0)`, avg ? avg.lph : 0), { fill: TOTAL, numFmt: N1, font: { bold: true } });
-      setc(ws, `G${row}`, F(`IFERROR(SUMIF(${C},">0",${Dd})/SUMIFS(${Ee},${C},">0"),0)`, avg ? avg.wonph : 0), { fill: TOTAL, numFmt: N0, font: { bold: true } });
-      const avgRow = row;
-      row++;
+      // 요약 합계
+      if (n) {
+        const S = { fill: TOTAL, font: { bold: true } };
+        mset(ws, `A${sumR}:B${sumR}`, '합 계', S);
+        for (const c of 'CEGH') setc(ws, `${c}${sumR}`, F(`SUM(${c}3:${c}${2 + n})`), { ...S, numFmt: c === 'G' ? N1 : N0 });
+        setc(ws, `D${sumR}`, F(`IFERROR(C${sumR}/G${sumR},0)`), { ...S, numFmt: N1 });
+        setc(ws, `F${sumR}`, F(`IFERROR(E${sumR}/G${sumR},0)`), { ...S, numFmt: N0 });
+        setc(ws, `I${sumR}`, null, S);
+      }
+      note(ws, `A${noteR}:I${noteR}`, '※ 유류: 경유사용집계표 / 사용시간·시간당 단가: 장비작업일보. 기름값 시세(L열)는 필요할 때 직접 입력하세요.');
+      note(ws, `A${noteR + 1}:I${noteR + 1}`, '※ 일자: 빨강 = 일요일·공휴일, 파랑 = 토요일' + (T.some((t) => !t.own) ? ', 갈색·회색 칸(예: 4/20) = 이 달 자료에 함께 적힌 이전 달 기록' : ''));
+      label(ws, `A${cmpT}`, '■ 기종 평균 대비 비교');
+      if (cmpH > supR) ws.getRow(cmpH).height = 18;
+      ['회사명', '장비명', '가동일수', '주유 횟수', '일평균 가동(h)', 'L/h', '기종 평균 L/h', '평균 대비', '비고']
+        .forEach((h, i) => setc(ws, `${colName(i)}${cmpH}`, h, { fill: HEAD, font: { bold: true, size: 9 } }));
+      ratioCF(ws, 'H', cmp0, cmpEnd);
+      note(ws, `A${cmpNote}:I${cmpNote}`, '※ 기종 평균 = 전 기간 같은 기종의 유류 합계 ÷ 사용시간 합계. 평균 대비 130% 이상 빨강, 70% 이하 파랑.');
 
-      // 차트 데이터 (J열~): 사용량 표, 사용료 표
-      const plates = [...labels.keys()];
-      const gks = months.map((g) => g.key);
-      const mats = [];
-      let mr = top;
-      for (const [kind, col, fmt, key] of [['L/h', 'F', N1, 'lph'], ['원/h', 'G', N0, 'wonph']]) {
-        const hr = mr;
-        setc(ws, `${colName(MC)}${hr}`, `그래프 자료 (${kind})`, { fill: SUB, font: { bold: true, size: 9 } });
-        months.forEach((g, i) => setc(ws, `${colName(MC + 1 + i)}${hr}`, g.short, { fill: SUB, font: { size: 9 } }));
-        const series = [];
-        plates.forEach((p, k) => {
-          const r = hr + 1 + k;
-          setc(ws, `${colName(MC)}${r}`, labels.get(p), { align: 'left', font: { size: 9 } });
-          const vals = gks.map((gk, i) => {
-            const x = cellOf[p][gk];
-            const a = `${colName(MC + 1 + i)}${r}`;
-            if (x && x[key] !== null) { setc(ws, a, F(`${col}${x.row}`, x[key]), { numFmt: fmt, font: { size: 9 } }); return round(x[key], 2); }
-            setc(ws, a, null, { font: { size: 9 } });
+      // 인쇄: 1쪽 = 요약·비교표, 2쪽부터 = 일별 내역(장비 P대씩, 쪽마다 일자 열)
+      const needW = Math.max(widthPx(ws, 0, 8), knPx + Math.min(P, n) * eqPx, pxOf(DATEW) + P * eqPx);
+      const needH = Math.max(heightPt(ws, 1, supR), heightPt(ws, 1, cmpNote));
+      const hFit = LAND.h / needH >= 0.6 ? needH : LAND.h / base;
+      page(ws, { land: true, scale: fitScale(LAND, needW, hFit), titles: '2:3', area: `A1:I${cmpNote}&&K1:${colName(lastCol)}${supR}` });
+      colBreaks[name] = dateCols;
+    });
+
+    // ================================================================ 장비별 평균
+    {
+      const ws = avgWs;
+      const MC = 10; // K열부터 그래프 자료 (인쇄 범위 밖)
+      [8, 24, 12, 13, 11, 12, 13, 10].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      ws.getColumn(9).width = 2; ws.getColumn(10).width = 2;
+      ws.getColumn(MC + 1).width = 22;
+      for (let i = 0; i < groups.length; i++) ws.getColumn(MC + 2 + i).width = 9;
+      mset(ws, 'A1:H1', '장비별 월 유류사용량 · 시간당 사용량', { font: { size: 14, bold: true }, align: 'left', border: false });
+      ws.getRow(1).height = 26;
+      note(ws, 'A2:H2', '※ 평균 = 유류·시간이 모두 있는 장비의 합계 기준 (L/h = 유류 합계 ÷ 시간 합계). 평균 대비 130% 이상 빨강, 70% 이하 파랑.');
+      const extra = {};
+      groups.forEach((g) => g.list.forEach((e) => { if (!model.classAvg[e.cls]) extra[e.cls] = 1; }));
+      const classes = model.classes.concat(Object.keys(extra));
+      const avgRowOf = {};
+      const totalW = widthPx(ws, 0, 7);
+      let row = 4;
+      const scale = fitScale(PORT, totalW, 1);
+      const cap = PORT.h * 100 / scale;   // 한 쪽에 들어가는 높이(pt)
+      let used = heightPt(ws, 1, 3);
+      classes.forEach((cls, ci) => {
+        const top = row;
+        setc(ws, `A${row}`, '장비명', { fill: HEAD, font: { bold: true } });
+        mset(ws, `B${row}:H${row}`, cls, { fill: HEAD, font: { bold: true, size: 11 } });
+        ws.getRow(row).height = 20;
+        row++;
+        ['월', '업체명', '유류 총 사용량', '유류 공급가액', '장비 사용시간', '시간당 유류사용량', '시간 대비 유류사용료', '평균 대비']
+          .forEach((h, i) => setc(ws, `${colName(i)}${row}`, h, { fill: SUB, font: { bold: true, size: 9 }, wrap: true }));
+        ws.getRow(row).height = 28;
+        row++;
+        const first = row;
+        const count = groups.reduce((s, g) => s + g.list.filter((e) => e.cls === cls).length, 0);
+        const avgRow = first + count;
+        avgRowOf[cls] = avgRow;
+        const avg = model.classAvg[cls];
+        const cellOf = {};
+        const labels = new Map();
+        const groupRange = {};
+        for (const g of groups) {
+          const es = g.list.filter((e) => e.cls === cls);
+          if (!es.length) continue;
+          const r0 = row;
+          const mi = monthInfo[g.key];
+          const sh = q(mi.name);
+          for (const e of es) {
+            const sr = mi.sr.get(e.plate);
+            setc(ws, `B${row}`, F(`${sh}A${sr}`, e.header), { align: 'left' });
+            setc(ws, `C${row}`, F(`${sh}C${sr}`, e.fuel), { numFmt: N0 });
+            setc(ws, `D${row}`, F(`${sh}E${sr}`, e.supply), { numFmt: N0 });
+            setc(ws, `E${row}`, F(`${sh}G${sr}`, e.hours), { numFmt: N1 });
+            setc(ws, `F${row}`, F(`IFERROR(C${row}/E${row},0)`, e.lph || 0), { numFmt: N1 });
+            setc(ws, `G${row}`, F(`IFERROR(D${row}/E${row},0)`, e.wonph || 0), { numFmt: N0 });
+            setc(ws, `H${row}`, F(`IF(OR(F${row}=0,F$${avgRow}=0),"",F${row}/F$${avgRow})`, avg && e.lph ? e.lph / avg.lph : ''), { numFmt: P0 });
+            ws.getRow(row).height = 16;
+            (cellOf[e.plate] = cellOf[e.plate] || {})[g.key] = { row, lph: e.lph, wonph: e.wonph };
+            if (!labels.has(e.plate)) labels.set(e.plate, e.header);
+            row++;
+          }
+          setc(ws, `A${r0}`, g.short);
+          if (row - 1 > r0) ws.mergeCells(`A${r0}:A${row - 1}`);
+          groupRange[g.key] = [r0, row - 1];
+        }
+        const last = row - 1;
+        const C = `C${first}:C${last}`, Dd = `D${first}:D${last}`, Ee = `E${first}:E${last}`;
+        const T1 = { fill: TOTAL, font: { bold: true } };
+        setc(ws, `A${row}`, null, T1);
+        setc(ws, `B${row}`, '평균 (L/h·원/h 가중)', T1);
+        const ok = `${C},">0",${Ee},">0"`; // 유류·시간이 모두 있는 행만
+        setc(ws, `C${row}`, F(`IFERROR(AVERAGEIFS(${C},${ok}),0)`), { ...T1, numFmt: N0 });
+        setc(ws, `D${row}`, F(`IFERROR(AVERAGEIFS(${Dd},${ok}),0)`), { ...T1, numFmt: N0 });
+        setc(ws, `E${row}`, F(`IFERROR(AVERAGEIFS(${Ee},${ok}),0)`), { ...T1, numFmt: N1 });
+        setc(ws, `F${row}`, F(`IFERROR(SUMIFS(${C},${ok})/SUMIFS(${Ee},${ok}),0)`, avg ? avg.lph : 0), { ...T1, numFmt: N1 });
+        setc(ws, `G${row}`, F(`IFERROR(SUMIFS(${Dd},${ok})/SUMIFS(${Ee},${ok}),0)`, avg ? avg.wonph : 0), { ...T1, numFmt: N0 });
+        setc(ws, `H${row}`, '100%', T1);
+        ws.getRow(row).height = 18;
+        ratioCF(ws, 'H', first, last);
+        row++;
+
+        // 그래프 자료 (K열~)
+        const plates = [...labels.keys()];
+        const gks = groups.map((g) => g.key);
+        const mats = [];
+        let mr = top;
+        for (const [kind, col, fmt, key] of [['L/h', 'F', N1, 'lph'], ['원/h', 'G', N0, 'wonph']]) {
+          const hr = mr;
+          setc(ws, `${colName(MC)}${hr}`, `그래프 자료 (${kind})`, { fill: SUB, font: { bold: true, size: 9 } });
+          groups.forEach((g, i) => setc(ws, `${colName(MC + 1 + i)}${hr}`, g.short, { fill: SUB, font: { size: 9 } }));
+          const series = [];
+          plates.forEach((p, k) => {
+            const r = hr + 1 + k;
+            setc(ws, `${colName(MC)}${r}`, labels.get(p), { align: 'left', font: { size: 9 } });
+            const vals = gks.map((gk, i) => {
+              const x = cellOf[p][gk];
+              const a = `${colName(MC + 1 + i)}${r}`;
+              if (x && x[key] !== null) { setc(ws, a, F(`${col}${x.row}`, x[key]), { numFmt: fmt, font: { size: 9 } }); return round(x[key], 2); }
+              setc(ws, a, null, { font: { size: 9 } });
+              return null;
+            });
+            series.push({ name: labels.get(p), nameRef: `$${colName(MC)}$${r}`, valRef: `$${colName(MC + 1)}$${r}:$${colName(MC + groups.length)}$${r}`, values: vals });
+          });
+          const ar = hr + 1 + plates.length;
+          setc(ws, `${colName(MC)}${ar}`, '평균', { align: 'left', fill: TOTAL, font: { size: 9, bold: true } });
+          const avals = gks.map((gk, i) => {
+            const a = `${colName(MC + 1 + i)}${ar}`;
+            const gr = groupRange[gk];
+            const b = avg && avg.byGroup[gk];
+            if (gr && b) {
+              const num = key === 'lph' ? 'C' : 'D';
+              const okg = `C${gr[0]}:C${gr[1]},">0",E${gr[0]}:E${gr[1]},">0"`;
+              setc(ws, a, F(`IFERROR(SUMIFS(${num}${gr[0]}:${num}${gr[1]},${okg})/SUMIFS(E${gr[0]}:E${gr[1]},${okg}),0)`, b[key]), { numFmt: fmt, fill: TOTAL, font: { size: 9, bold: true } });
+              return round(b[key], 2);
+            }
+            setc(ws, a, null, { fill: TOTAL });
             return null;
           });
-          series.push({ name: labels.get(p), nameRef: `$${colName(MC)}$${r}`, valRef: `$${colName(MC + 1)}$${r}:$${colName(MC + months.length)}$${r}`, values: vals });
+          series.push({ name: '평균', nameRef: `$${colName(MC)}$${ar}`, valRef: `$${colName(MC + 1)}$${ar}:$${colName(MC + groups.length)}$${ar}`, values: avals, avg: true, color: '404040', labels: key === 'lph' ? '0.0' : '#,##0' });
+          mats.push({ kind, hr, series, fmt: key === 'lph' ? '#,##0.0' : '#,##0' });
+          mr = ar + 2;
+        }
+        // 그래프 2개를 표 아래에 나란히
+        const chartTop = row; // 0부터 세는 행 번호 = row → 1부터 세면 row+1
+        const CH = 16;
+        for (let r = chartTop; r <= chartTop + CH + 1; r++) ws.getRow(r).height = 15;
+        const half = Math.floor(totalW / 2);
+        const L0 = colAt(ws, 0), L1 = colAt(ws, half - 4), R0 = colAt(ws, half + 4), R1 = colAt(ws, totalW);
+        mats.forEach((m, i) => {
+          const [a, b] = i === 0 ? [L0, L1] : [R0, R1];
+          charts.push({
+            host: ws.name,
+            anchor: { c1: a.c, o1: a.o, r1: chartTop, c2: b.c, o2: b.o, r2: chartTop + CH },
+            xml: chartXml({
+              title: `${cls} ${m.kind === 'L/h' ? '시간당 유류사용량 (L/h)' : '시간당 유류사용료 (원/h)'}`,
+              sheet: ws.name, catRef: `$${colName(MC + 1)}$${m.hr}:$${colName(MC + groups.length)}$${m.hr}`,
+              cats: groups.map((g) => g.short), lines: m.series, numFmt: m.fmt,
+            }),
+          });
         });
-        const ar = hr + 1 + plates.length;
-        setc(ws, `${colName(MC)}${ar}`, '평균', { align: 'left', fill: TOTAL, font: { size: 9, bold: true } });
-        const avals = gks.map((gk, i) => {
-          const a = `${colName(MC + 1 + i)}${ar}`;
-          const gr = groupRange[gk];
-          const b = avg && avg.byGroup[gk];
-          if (gr && b) {
-            const num = key === 'lph' ? 'C' : 'D';
-            setc(ws, a, F(`IFERROR(SUMIF(C${gr[0]}:C${gr[1]},">0",${num}${gr[0]}:${num}${gr[1]})/SUMIFS(E${gr[0]}:E${gr[1]},C${gr[0]}:C${gr[1]},">0"),0)`, b[key]), { numFmt: fmt, fill: TOTAL, font: { size: 9, bold: true } });
-            return round(b[key], 2);
-          }
-          setc(ws, a, null, { fill: TOTAL });
-          return null;
-        });
-        series.push({ name: '평균', nameRef: `$${colName(MC)}$${ar}`, valRef: `$${colName(MC + 1)}$${ar}:$${colName(MC + months.length)}$${ar}`, values: avals, avg: true, color: '404040' });
-        mats.push({ kind, hr, series, fmt: key === 'lph' ? '#,##0.0' : '#,##0' });
-        mr = ar + 2;
+        const blockEnd = Math.max(chartTop + CH + 1, mr);
+        const h = heightPt(ws, top, blockEnd);
+        if (used + h > cap && ci > 0) { ws.getRow(top - 1).addPageBreak(); used = h; } else used += h;
+        row = blockEnd + 1;
+      });
+      const end = Math.max(row - 1, 3);
+      page(ws, { scale, area: `A1:H${end}` });
+      for (const x of classAvgRef) {
+        const r = avgRowOf[x.cls];
+        setc(x.ws, x.addr, F(`${q(ws.name)}F${r}`, x.value), { numFmt: x.fmt });
       }
-      const blockEnd = Math.max(row, mr, top + 17);
-      mats.forEach((m, i) => {
-        const c1 = chartCol + i * 8;
+      monthInfo.avgRowOf = avgRowOf;
+    }
+
+    // ================================================================ 장비별 상세 카드
+    {
+      const ws = cardWs;
+      const W = [9, 9, 10, 10, 11, 10, 9, 12.5, 12.5, 12];
+      W.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      const totalW = widthPx(ws, 0, 9);
+      const avgRowOf = monthInfo.avgRowOf;
+      const order = [];
+      const seen = new Set();
+      const clsRank = (c) => { const i = model.classes.indexOf(c); return i < 0 ? 99 : i; };
+      groups.forEach((g) => g.list.forEach((e) => { if (!seen.has(e.plate)) { seen.add(e.plate); order.push({ plate: e.plate, cls: e.cls }); } }));
+      order.sort((a, b) => clsRank(a.cls) - clsRank(b.cls) || a.cls.localeCompare(b.cls) || a.plate.localeCompare(b.plate));
+      let row = 1, dcol = 0;
+      const cardScale = fitScale(PORT, totalW, 1);
+      const cardCap = PORT.h * 100 / cardScale - 10;
+      order.forEach(({ plate }, k) => {
+        const occ = groups.map((g) => ({ g, e: g.equip.get(plate) })).filter((x) => x.e && x.g.list.includes(x.e));
+        const e0 = occ[0].e;
+        const cls = e0.cls;
+        const top = row;
+        const avg = model.classAvg[cls];
+        const rates = [...new Set(occ.map((x) => round(x.e.rate, 0)).filter(Boolean))];
+        const kinds = [...new Set(occ.map((x) => x.e.kind).filter(Boolean))];
+        mset(ws, `A${row}:J${row}`, `No.${k + 1}   ${e0.header}   ·   ${cls}`, { fill: BAR, align: 'left', font: { size: 12, bold: true, color: { argb: 'FFFFFFFF' } } });
+        ws.getRow(row).height = 24;
+        row++;
+        note(ws, `A${row}:J${row}`, [`투입 ${occ[0].g.label}${occ.length > 1 ? ` ~ ${occ[occ.length - 1].g.label}` : ''}`,
+          rates.length ? `시간당 단가 ${rates.map((x) => x.toLocaleString()).join(' / ')}원` : '',
+          kinds.length ? `구분 ${kinds.join('/')}` : '',
+          avg ? `기종 평균 ${round(avg.lph, 1)} L/h (전 기간)` : ''].filter(Boolean).join('   ·   '));
+        ws.getRow(row).height = 18;
+        row += 2;
+        label(ws, `A${row}`, '■ 월별 실적', 10);
+        row++;
+        ['월', '가동일수', '사용시간(h)', '유류(L)', 'L/h', '기종 평균(L/h)', '평균 대비', '유류 공급가액', '장비 사용금액', '유류비÷장비비']
+          .forEach((h, i) => setc(ws, `${colName(i)}${row}`, h, { fill: HEAD, font: { bold: true, size: 9 }, wrap: true }));
+        ws.getRow(row).height = 28;
+        row++;
+        const m0 = row;
+        for (const { g, e } of occ) {
+          const mi = monthInfo[g.key];
+          const sh = q(mi.name);
+          const sr = mi.sr.get(plate), cr = mi.cmp.get(plate);
+          const wd = [...e.days.values()].filter((v) => v.h > 0).length;
+          setc(ws, `A${row}`, g.label);
+          setc(ws, `B${row}`, F(`${sh}C${cr}`, wd), { numFmt: DAYS });
+          setc(ws, `C${row}`, F(`${sh}G${sr}`, e.hours), { numFmt: N1 });
+          setc(ws, `D${row}`, F(`${sh}C${sr}`, e.fuel), { numFmt: N0 });
+          setc(ws, `E${row}`, F(`IFERROR(D${row}/C${row},0)`, e.lph || 0), { numFmt: N1 });
+          if (avg) setc(ws, `F${row}`, F(`${sh}G${cr}`, avg.lph), { numFmt: N1 }); else setc(ws, `F${row}`, '-');
+          setc(ws, `G${row}`, F(`IF(OR(E${row}=0,N(F${row})=0),"",E${row}/F${row})`, avg && e.lph ? e.lph / avg.lph : ''), { numFmt: P0 });
+          setc(ws, `H${row}`, F(`${sh}E${sr}`, e.supply), { numFmt: N0 });
+          setc(ws, `I${row}`, F(`${sh}H${sr}`, e.hours * e.rate), { numFmt: N0 });
+          setc(ws, `J${row}`, F(`IFERROR(H${row}/I${row},"")`, e.hours * e.rate ? e.supply / (e.hours * e.rate) : ''), { numFmt: P0 });
+          ws.getRow(row).height = 16;
+          row++;
+        }
+        const m1 = row - 1;
+        const T1 = { fill: TOTAL, font: { bold: true } };
+        setc(ws, `A${row}`, '합 계', T1);
+        for (const c of 'BCDHI') setc(ws, `${c}${row}`, F(`SUM(${c}${m0}:${c}${m1})`), { ...T1, numFmt: c === 'B' ? DAYS : c === 'C' ? N1 : N0 });
+        setc(ws, `E${row}`, F(`IFERROR(D${row}/C${row},0)`), { ...T1, numFmt: N1 });
+        if (avg) setc(ws, `F${row}`, F(`${q(avgWs.name)}F${avgRowOf[cls]}`, avg.lph), { ...T1, numFmt: N1 }); else setc(ws, `F${row}`, '-', T1);
+        setc(ws, `G${row}`, F(`IF(OR(E${row}=0,N(F${row})=0),"",E${row}/F${row})`), { ...T1, numFmt: P0 });
+        setc(ws, `J${row}`, F(`IFERROR(H${row}/I${row},"")`), { ...T1, numFmt: P0 });
+        ws.getRow(row).height = 17;
+        ratioCF(ws, 'G', m0, row);
+        row += 2;
+
+        // 일별 그래프 (자료는 숨긴 '그래프 자료' 시트)
+        label(ws, `A${row}`, '■ 일별 주유량 · 작업시간', 10);
+        row++;
+        const base = dcol;
+        dcol += 3;
+        const [cL, cQ, cH] = [0, 1, 2].map((i) => colName(base + i));
+        setc(dataWs, `${cL}1`, e0.header, { border: false });
+        setc(dataWs, `${cQ}1`, '주유량(L)', { border: false });
+        setc(dataWs, `${cH}1`, '작업시간(h)', { border: false });
+        const pts = [];
+        for (const { g } of occ) {
+          const mi = monthInfo[g.key];
+          const { cq, ch } = mi.cols.get(plate);
+          const e = g.equip.get(plate);
+          mi.days.forEach((dd, j) => {
+            const v = e.days.get(`${pad2(dd.t.m)}-${pad2(dd.t.d)}`) || { q: 0, h: 0 };
+            pts.push({ label: `${dd.t.m}/${dd.t.d}`, q: v.q || 0, h: v.h || 0, ref: `${q(mi.name)}`, r: mi.first + j, cq, ch });
+          });
+        }
+        pts.forEach((p, i) => {
+          const r = i + 2;
+          setc(dataWs, `${cL}${r}`, p.label, { border: false });
+          setc(dataWs, `${cQ}${r}`, F(`${p.ref}${p.cq}${p.r}`, p.q), { border: false });
+          setc(dataWs, `${cH}${r}`, F(`${p.ref}${p.ch}${p.r}`, p.h), { border: false });
+        });
+        const endR = pts.length + 1;
+        const CH = 14;
+        for (let r = row; r <= row + CH; r++) ws.getRow(r).height = 15;
         charts.push({
-          anchor: { c1, r1: top - 1, c2: c1 + 8, r2: top - 1 + 16 },
-          xml: lineChartXml({
-            title: `${cls} ${m.kind === 'L/h' ? '시간당 유류사용량 (L/h)' : '시간당 유류사용료 (원/h)'}`,
-            sheet: '장비별 평균', catRef: `$${colName(MC + 1)}$${m.hr}:$${colName(MC + months.length)}$${m.hr}`,
-            cats: months.map((g) => g.short), series: m.series, numFmt: m.fmt,
+          host: ws.name,
+          anchor: { c1: 0, r1: row - 1, c2: 10, r2: row - 1 + CH },
+          xml: chartXml({
+            title: `${e0.header} 일별 주유량 · 작업시간`, sheet: dataWs.name,
+            catRef: `$${cL}$2:$${cL}$${endR}`, cats: pts.map((p) => p.label),
+            bars: [{ name: '주유량(L)', nameRef: `$${cQ}$1`, valRef: `$${cQ}$2:$${cQ}$${endR}`, values: pts.map((p) => p.q), color: '5B9BD5' }],
+            lines: [{ name: '작업시간(h)', nameRef: `$${cH}$1`, valRef: `$${cH}$2:$${cH}$${endR}`, values: pts.map((p) => p.h), color: 'C0392B', noMarker: true, width: 15875 }],
+            secondary: true, numFmt: '#,##0', numFmt2: '0', yTitle: 'L', y2Title: 'h', gap: 40, overlap: 0,
+            skip: Math.max(1, Math.ceil(pts.length / 16)),
           }),
         });
+        row += CH + 1;
+
+        // 주유 내역 (구간 L/h)
+        label(ws, `A${row}`, '■ 주유 내역 (직전 주유 이후 작업시간 기준)', 10);
+        row++;
+        const ivs = occ.flatMap((x) => x.e.intervals || []);
+        const H5 = ['주유일', '주유량(L)', '작업시간(h)', '구간 L/h', '판정'];
+        const SHORT = { '투입 첫 주유': '첫 주유', '철수 전 주유': '철수 전', '월말 주유': '월말', '작업 전 주유': '작업 전' };
+        const RH = 14.5;
+        const header = (two) => {
+          (two ? [0, 5] : [0]).forEach((c0) => H5.forEach((h, i) => setc(ws, `${colName(c0 + i)}${row}`, h, { fill: SUB, font: { bold: true, size: 9 } })));
+          ws.getRow(row).height = 17;
+          row++;
+        };
+        if (!ivs.length) {
+          header(false);
+          note(ws, `A${row}:J${row}`, '주유 기록이나 작업시간이 없어 구간 계산을 하지 않았습니다.');
+          row++;
+        } else {
+          // 쪽 높이에 맞춰 나누고, 넘치면 다음 쪽에 제목·머리행을 다시 넣음
+          let rest = ivs.slice();
+          let usedH = heightPt(ws, top, row - 1);
+          let firstChunk = true;
+          while (rest.length) {
+            if (!firstChunk) {
+              ws.getRow(row - 1).addPageBreak();
+              mset(ws, `A${row}:J${row}`, `No.${k + 1}   ${e0.header}   ·   주유 내역 (계속)`, { fill: BAR, align: 'left', font: { size: 11, bold: true, color: { argb: 'FFFFFFFF' } } });
+              ws.getRow(row).height = 22;
+              row++;
+              usedH = 22;
+            }
+            const fitRows = Math.max(4, Math.floor((cardCap - usedH - 17 - 18) / RH));
+            const two = rest.length > 1;
+            const chunk = rest.splice(0, two ? fitRows * 2 : 1);
+            header(two && chunk.length > 1);
+            const half = Math.ceil(chunk.length / 2);
+            const r0 = row;
+            chunk.forEach((v, i) => {
+              const c0 = i < half ? 0 : 5;
+              const r = r0 + (c0 ? i - half : i);
+              const judge = v.judge + (v.tags.length ? `(${v.tags.map((t) => SHORT[t] || t).join('·')})` : '');
+              const small = { font: { size: 9 } };
+              setc(ws, `${colName(c0)}${r}`, `${v.to.m}/${v.to.d}`, small);
+              setc(ws, `${colName(c0 + 1)}${r}`, v.fuel, { ...small, numFmt: N0 });
+              setc(ws, `${colName(c0 + 2)}${r}`, round(v.hours, 1), { ...small, numFmt: N1 });
+              setc(ws, `${colName(c0 + 3)}${r}`, v.lph === null ? '-' : round(v.lph, 1), { ...small, numFmt: v.lph === null ? undefined : N1 });
+              setc(ws, `${colName(c0 + 4)}${r}`, judge, { font: { size: v.tags.length ? 8 : 9, bold: v.judge !== '정상' }, fill: JUDGE_FILL[v.judge] });
+            });
+            const rows = chunk.length > 1 ? half : 1;
+            for (let r = r0; r < r0 + rows; r++) ws.getRow(r).height = RH;
+            row = r0 + rows;
+            firstChunk = false;
+          }
+        }
+        note(ws, `A${row}:J${row}`, '※ 구간 L/h = 주유량 ÷ 직전 주유 이후 작업시간. 기종 평균 대비 150% 초과 = 과다, 60% 미만(8h 이상 구간) = 과소.');
+        const cardEnd = row;
+        if (k < order.length - 1) ws.getRow(cardEnd + 1).addPageBreak();
+        row = cardEnd + 2;
       });
-      row = blockEnd + 2;
+      const end = Math.max(row - 2, 1);
+      page(ws, { scale: cardScale, area: `A1:J${end}` });
     }
-    [9, 22, 13, 14, 12, 13, 14, 2, 2].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
-    ws.getColumn(MC + 1).width = 20;
-    for (let i = 0; i < months.length; i++) ws.getColumn(MC + 2 + i).width = 9;
 
-    // ---- 작업일보 청구 대조
-    const bw = wb.addWorksheet('작업일보 청구 대조', { views: [{ state: 'frozen', ySplit: 2 }] });
-    setc(bw, 'A1', '장비작업일보 청구금액 대조 (공급가액)', { font: { size: 13, bold: true }, align: 'left', border: false });
-    const bh = ['월', '업체(차량번호)', '장비명', '구분', '비고', '사용시간(h)', '시간당 단가', '시간×단가', '작업일보 금액', '고정 가산금', '유류 공급가액', '유류비÷청구액'];
-    bh.forEach((h, i) => setc(bw, `${colName(i)}2`, h, { fill: HEAD, font: { bold: true } }));
-    let br = 3;
-    for (const g of model.groups) for (const e of g.list) {
-      [g.label, e.header, e.cls, e.kind, e.notes].forEach((v, i) => setc(bw, `${colName(i)}${br}`, v, { align: i ? 'left' : 'center' }));
-      setc(bw, `F${br}`, e.hours, { numFmt: N1 });
-      setc(bw, `G${br}`, round(e.rate, 0), { numFmt: N0 });
-      setc(bw, `H${br}`, round(e.rental, 0), { numFmt: N0 });
-      setc(bw, `I${br}`, round(e.billed, 0), { numFmt: N0 });
-      setc(bw, `J${br}`, F(`I${br}-H${br}`, e.billed - e.rental), { numFmt: N0, fill: Math.abs(e.billed - e.rental) >= 1 ? YEL : undefined });
-      setc(bw, `K${br}`, round(e.supply, 0), { numFmt: N0 });
-      setc(bw, `L${br}`, F(`IFERROR(K${br}/I${br},0)`, e.billed ? e.supply / e.billed : 0), { numFmt: '0%' });
-      br++;
+    // ================================================================ 작업일보 청구 대조
+    {
+      const ws = bw;
+      mset(ws, 'A1:L1', '장비작업일보 청구금액 대조 (공급가액)', { font: { size: 13, bold: true }, align: 'left', border: false });
+      ws.getRow(1).height = 24;
+      const bh = ['월', '업체(차량번호)', '장비명', '구분', '비고', '사용시간(h)', '시간당 단가', '시간×단가', '작업일보 금액', '고정 가산금', '유류 공급가액', '유류비÷청구액'];
+      bh.forEach((h, i) => setc(ws, `${colName(i)}2`, h, { fill: HEAD, font: { bold: true }, wrap: true }));
+      ws.getRow(2).height = 30;
+      let br = 3;
+      for (const g of groups) {
+        const r0 = br;
+        for (const e of g.list) {
+          setc(ws, `A${br}`, g.label);
+          [e.header, e.cls, e.kind, e.notes].forEach((v, i) => setc(ws, `${colName(i + 1)}${br}`, v, { align: i === 0 || i === 3 ? 'left' : 'center', font: i === 3 ? { size: 9 } : {} }));
+          setc(ws, `F${br}`, e.hours, { numFmt: N1 });
+          setc(ws, `G${br}`, round(e.rate, 0), { numFmt: N0 });
+          setc(ws, `H${br}`, round(e.rental, 0), { numFmt: N0 });
+          setc(ws, `I${br}`, round(e.billed, 0), { numFmt: N0 });
+          setc(ws, `J${br}`, F(`I${br}-H${br}`, e.billed - e.rental), { numFmt: N0, fill: Math.abs(e.billed - e.rental) >= 1 ? YEL : undefined });
+          setc(ws, `K${br}`, round(e.supply, 0), { numFmt: N0 });
+          setc(ws, `L${br}`, F(`IFERROR(K${br}/I${br},0)`, e.billed ? e.supply / e.billed : 0), { numFmt: P0 });
+          ws.getRow(br).height = 16;
+          br++;
+        }
+        // 월 소계
+        const S = { fill: SUB, font: { bold: true } };
+        mset(ws, `A${br}:E${br}`, `${g.label} 소계`, S);
+        for (const c of 'FHIJK') setc(ws, `${c}${br}`, F(`SUM(${c}${r0}:${c}${br - 1})`), { ...S, numFmt: c === 'F' ? N1 : N0 });
+        setc(ws, `G${br}`, null, S);
+        setc(ws, `L${br}`, F(`IFERROR(K${br}/I${br},0)`), { ...S, numFmt: P0 });
+        ws.getRow(br).height = 17;
+        br++;
+      }
+      const T1 = { fill: TOTAL, font: { bold: true } };
+      mset(ws, `A${br}:E${br}`, '합 계', T1);
+      for (const c of 'FHIJK') setc(ws, `${c}${br}`, F(`SUMIF($A$3:$A${br - 1},"*소계",${c}3:${c}${br - 1})`), { ...T1, numFmt: c === 'F' ? N1 : N0 });
+      setc(ws, `G${br}`, null, T1);
+      setc(ws, `L${br}`, F(`IFERROR(K${br}/I${br},0)`), { ...T1, numFmt: P0 });
+      ws.getRow(br).height = 18;
+      note(ws, `A${br + 1}:L${br + 1}`, '※ 고정 가산금 = 작업일보 금액 − 사용시간×단가 (노란 칸). 유류비÷청구액은 장비 임대료 대비 유류비 비중입니다.');
+      [9, 24, 8, 8, 16, 11, 10, 15, 15, 13, 15, 10].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      page(ws, { land: true, fit: true, titles: '2:2', area: `A1:L${br + 1}` });
     }
-    setc(bw, `A${br}`, '합계', { fill: TOTAL, font: { bold: true } });
-    for (const c of 'BCDE') setc(bw, `${c}${br}`, '', { fill: TOTAL });
-    for (const c of 'FHIJK') setc(bw, `${c}${br}`, F(`SUM(${c}3:${c}${br - 1})`), { fill: TOTAL, numFmt: c === 'F' ? N1 : N0, font: { bold: true } });
-    setc(bw, `G${br}`, '', { fill: TOTAL }); setc(bw, `L${br}`, '', { fill: TOTAL });
-    [10, 24, 10, 10, 18, 11, 11, 13, 13, 13, 13, 11].forEach((w, i) => { bw.getColumn(i + 1).width = w; });
 
-    // ---- 점검 결과
-    const cw = wb.addWorksheet('점검 결과');
-    setc(cw, 'A1', '주유 구간 점검 (직전 주유 후 작업시간 대비)', { font: { size: 13, bold: true }, align: 'left', border: false });
-    ['판정', '월', '기종', '업체(차량번호)', '구간', '주유량(L)', '작업시간(h)', '구간 L/h', '기종 평균 L/h', '평균 대비', '표시'].forEach((h, i) => setc(cw, `${colName(i)}2`, h, { fill: HEAD, font: { bold: true } }));
-    let cr = 3;
-    for (const f of model.fills) {
+    // ================================================================ 점검 결과
+    {
+      const ws = cw;
+      [8, 9, 10, 22, 13, 10, 10, 10, 11, 9, 20].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      mset(ws, 'A1:K1', '주유 구간 점검 (직전 주유 후 작업시간 대비)', { font: { size: 13, bold: true }, align: 'left', border: false });
+      ws.getRow(1).height = 24;
+      ['판정', '월', '기종', '업체(차량번호)', '구간', '주유량(L)', '작업시간(h)', '구간 L/h', '기종 평균 L/h', '평균 대비', '표시']
+        .forEach((h, i) => setc(ws, `${colName(i)}2`, h, { fill: HEAD, font: { bold: true }, wrap: true }));
+      ws.getRow(2).height = 30;
+      let cr = 3;
       const lab = (t) => `${t.m}/${t.d}`;
-      const vals = [f.judge, f.group.label, f.e.cls, f.e.header, f.from === f.to ? lab(f.to) : `${lab(f.from)}~${lab(f.to)}`, f.fuel, f.hours, f.lph === null ? '-' : round(f.lph, 1), round(f.base, 1), f.ratio === null ? '-' : f.ratio, f.tags.join(', ')];
-      vals.forEach((v, i) => setc(cw, `${colName(i)}${cr}`, v, { numFmt: i === 9 ? '0%' : i === 6 ? N1 : i === 5 ? N0 : undefined, align: i === 3 || i === 10 ? 'left' : 'center',
-        fill: i === 0 ? fill(f.judge === '과소' ? 'FFDDEBF7' : f.judge === '확인' ? 'FFF2F2F2' : 'FFF8CBAD') : undefined }));
+      for (const f of model.fills) {
+        const vals = [f.judge, f.group.label, f.e.cls, f.e.header, f.from === f.to ? lab(f.to) : `${lab(f.from)}~${lab(f.to)}`, f.fuel, f.hours,
+          f.lph === null ? '-' : round(f.lph, 1), round(f.base, 1), f.ratio === null ? '-' : f.ratio, f.tags.join(', ')];
+        const fmts = [, , , , , N0, N1, f.lph === null ? undefined : N1, N1, f.ratio === null ? undefined : P0];
+        vals.forEach((v, i) => setc(ws, `${colName(i)}${cr}`, v, {
+          numFmt: fmts[i], align: i === 3 || i === 10 ? 'left' : undefined, font: i === 0 ? { bold: true } : i === 10 ? { size: 9 } : {},
+          fill: i === 0 ? JUDGE_FILL[f.judge] : undefined,
+        }));
+        ws.getRow(cr).height = 16;
+        cr++;
+      }
+      if (!model.fills.length) { note(ws, `A${cr}:K${cr}`, '특이 구간 없음'); cr++; }
+      cr += 1;
+      mset(ws, `A${cr}:K${cr}`, '자료 확인 사항', { font: { size: 13, bold: true }, align: 'left', border: false });
+      ws.getRow(cr).height = 24;
       cr++;
-    }
-    if (!model.fills.length) { setc(cw, `A${cr}`, '특이 구간 없음', { border: false, align: 'left' }); cr++; }
-    cr += 2;
-    setc(cw, `A${cr}`, '자료 확인 사항', { font: { size: 13, bold: true }, align: 'left', border: false });
-    cr++;
-    ['구분', '위치', '내용', '설명'].forEach((h, i) => setc(cw, `${colName(i)}${cr}`, h, { fill: HEAD, font: { bold: true } }));
-    cr++;
-    const LV = { error: '오류', warn: '주의', info: '참고' };
-    for (const i of model.issues) {
-      [LV[i.level], i.where, i.title, i.detail].forEach((v, k) => setc(cw, `${colName(k)}${cr}`, v, { align: k ? 'left' : 'center', wrap: k >= 2 }));
+      setc(ws, `A${cr}`, '구분', { fill: HEAD, font: { bold: true } });
+      mset(ws, `B${cr}:C${cr}`, '위치', { fill: HEAD, font: { bold: true } });
+      mset(ws, `D${cr}:F${cr}`, '내용', { fill: HEAD, font: { bold: true } });
+      mset(ws, `G${cr}:K${cr}`, '설명', { fill: HEAD, font: { bold: true } });
       cr++;
+      const LV = { error: '오류', warn: '주의', info: '참고' };
+      const LVF = { error: fill('FFF8CBAD'), warn: fill('FFFFE699'), info: undefined };
+      const unitsOf = (s) => [...txt(s)].reduce((n, ch) => n + (ch.charCodeAt(0) > 255 ? 1.85 : 1), 0);
+      const widthU = (a, b) => { let s = 0; for (let c = a; c <= b; c++) s += ws.getColumn(c + 1).width; return s; };
+      const [wB, wD, wG] = [widthU(1, 2), widthU(3, 5), widthU(6, 10)];
+      for (const i of model.issues) {
+        setc(ws, `A${cr}`, LV[i.level], { fill: LVF[i.level], font: { bold: true } });
+        mset(ws, `B${cr}:C${cr}`, i.where, { align: 'left', wrap: true, font: { size: 9 } });
+        mset(ws, `D${cr}:F${cr}`, i.title, { align: 'left', wrap: true });
+        mset(ws, `G${cr}:K${cr}`, i.detail, { align: 'left', wrap: true, font: { size: 9 } });
+        const lines = Math.max(Math.ceil(unitsOf(i.where) * 0.9 / wB), Math.ceil(unitsOf(i.title) / wD), Math.ceil(unitsOf(i.detail) * 0.9 / wG), 1);
+        ws.getRow(cr).height = Math.max(18, lines * 13 + 5);
+        cr++;
+      }
+      page(ws, { land: true, fit: true, area: `A1:K${cr - 1}` });
     }
-    [9, 22, 36, 60, 16, 10, 11, 10, 12, 10, 22].forEach((w, i) => { cw.getColumn(i + 1).width = w; });
 
-    // ---- 읽은 자료
-    const sw = wb.addWorksheet('읽은 자료');
-    ['파일', '시트', '종류', '달', '비고'].forEach((h, i) => setc(sw, `${colName(i)}1`, h, { fill: HEAD, font: { bold: true } }));
-    model.sheetsUsed.forEach((s, i) => [s.file, s.sheet, s.kind, `${s.year}.${s.month}월`, s.kind === '경유사용집계표' ? `표 ${s.tables}개` : `장비 ${s.rows}행`]
-      .forEach((v, k) => setc(sw, `${colName(k)}${i + 2}`, v, { align: 'left' })));
-    setc(sw, `A${model.sheetsUsed.length + 3}`, model.merge ? '※ 이 달 대장·작업일보에 함께 적힌 이전 달 기록(N월분)은 해당 시트의 달에 합쳐 계산했습니다.' : '※ 이전 달 기록(N월분)은 실제 날짜의 달로 나눠 계산했습니다.', { border: false, align: 'left', font: { size: 9 } });
-    [34, 34, 16, 10, 14].forEach((w, i) => { sw.getColumn(i + 1).width = w; });
+    // ================================================================ 읽은 자료
+    {
+      const ws = sw;
+      mset(ws, 'A1:E1', '읽은 원자료', { font: { size: 13, bold: true }, align: 'left', border: false });
+      ws.getRow(1).height = 24;
+      ['파일', '시트', '종류', '달', '비고'].forEach((h, i) => setc(ws, `${colName(i)}2`, h, { fill: HEAD, font: { bold: true } }));
+      model.sheetsUsed.forEach((s, i) => [s.file, s.sheet, s.kind, `${s.year}.${s.month}월`, s.kind === '경유사용집계표' ? `표 ${s.tables}개` : `장비 ${s.rows}행`]
+        .forEach((v, k) => setc(ws, `${colName(k)}${i + 3}`, v, { align: k < 2 ? 'left' : 'center', font: { size: 9 } })));
+      const nr = model.sheetsUsed.length + 4;
+      note(ws, `A${nr}:E${nr}`, model.merge ? '※ 이 달 대장·작업일보에 함께 적힌 이전 달 기록(N월분)은 해당 시트의 달에 합쳐 계산했습니다.' : '※ 이전 달 기록(N월분)은 실제 날짜의 달로 나눠 계산했습니다.');
+      note(ws, `A${nr + 1}:E${nr + 1}`, '※ 휴일 표시: 일요일·토요일, 2024~2026년 공휴일(대체·임시 포함), 그 밖의 해는 날짜가 고정된 공휴일만.');
+      [34, 30, 14, 10, 12].forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      page(ws, { fit: true, area: `A1:E${nr + 1}` });
+    }
 
-    // ---- 쓰기 + 그래프 넣기
+    // ================================================================ 총괄 요약 (표지)
+    {
+      const ws = coverWs;
+      const W = [11, 10, 13, 15, 12, 15, 11, 11];
+      W.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+      ws.getColumn(9).width = 2;
+      const totalW = widthPx(ws, 0, 7);
+      // 제목 + 결재란
+      mset(ws, 'A1:E1', site, { font: { size: 10, bold: true, color: { argb: 'FF404040' } }, align: 'left', border: false, wrap: true });
+      mset(ws, 'A2:E2', '유류대 및 장비비 대조 총괄', { font: { size: 16, bold: true }, align: 'left', border: false });
+      note(ws, 'A3:E3', `대상 기간 ${period}   ·   장비 ${model.totals.equip}대   ·   작성일 ${today}`);
+      ['작 성', '검 토', '승 인'].forEach((h, i) => setc(ws, `${colName(5 + i)}1`, h, { fill: SUB, font: { bold: true, size: 9 } }));
+      ['F', 'G', 'H'].forEach((c) => mset(ws, `${c}2:${c}3`, null, {}));
+      ws.getRow(1).height = 30; ws.getRow(2).height = 30; ws.getRow(3).height = 22;
+      let r = 5;
+      // 1. 월별 합계
+      label(ws, `A${r}`, '1. 월별 합계'); ws.getRow(r).height = 20; r++;
+      ['월', '장비 대수', '유류 사용량(L)', '유류 공급가액(원)', '장비 사용시간(h)', '장비 사용금액(원)', '시간당 유류(L/h)', '유류비÷장비비']
+        .forEach((h, i) => setc(ws, `${colName(i)}${r}`, h, { fill: HEAD, font: { bold: true, size: 9 }, wrap: true }));
+      ws.getRow(r).height = 30; r++;
+      const mt0 = r;
+      for (const g of groups) {
+        const mi = monthInfo[g.key];
+        const sh = q(mi.name);
+        const n = g.list.length, e2 = 2 + n;
+        const sum = (k) => g.list.reduce((s, e) => s + (e[k] || 0), 0);
+        const rental = g.list.reduce((s, e) => s + e.hours * e.rate, 0);
+        setc(ws, `A${r}`, g.label, { font: { bold: true } });
+        setc(ws, `B${r}`, F(`COUNTA(${sh}B3:B${e2})`, n), { numFmt: '0"대"' });
+        setc(ws, `C${r}`, F(`SUM(${sh}C3:C${e2})`, sum('fuel')), { numFmt: N0 });
+        setc(ws, `D${r}`, F(`SUM(${sh}E3:E${e2})`, sum('supply')), { numFmt: N0 });
+        setc(ws, `E${r}`, F(`SUM(${sh}G3:G${e2})`, sum('hours')), { numFmt: N1 });
+        setc(ws, `F${r}`, F(`SUM(${sh}H3:H${e2})`, rental), { numFmt: N0 });
+        setc(ws, `G${r}`, F(`IFERROR(C${r}/E${r},0)`), { numFmt: N1 });
+        setc(ws, `H${r}`, F(`IFERROR(D${r}/F${r},0)`), { numFmt: P0 });
+        ws.getRow(r).height = 18;
+        r++;
+      }
+      const mt1 = r - 1;
+      const T1 = { fill: TOTAL, font: { bold: true } };
+      setc(ws, `A${r}`, '합 계', T1);
+      setc(ws, `B${r}`, model.totals.equip, { ...T1, numFmt: '0"대"' });
+      for (const c of 'CDEF') setc(ws, `${c}${r}`, F(`SUM(${c}${mt0}:${c}${mt1})`), { ...T1, numFmt: c === 'E' ? N1 : N0 });
+      setc(ws, `G${r}`, F(`IFERROR(C${r}/E${r},0)`), { ...T1, numFmt: N1 });
+      setc(ws, `H${r}`, F(`IFERROR(D${r}/F${r},0)`), { ...T1, numFmt: P0 });
+      ws.getRow(r).height = 20;
+      r++;
+      note(ws, `A${r}:H${r}`, '※ 합계의 장비 대수는 중복을 뺀 실제 대수. 시간당 유류 = 유류 합계 ÷ 사용시간 합계(작업시간이 없는 장비 포함).');
+      r += 2;
+
+      // 2. 기종별 평균
+      label(ws, `A${r}`, '2. 기종별 평균 (전 기간 가중평균)'); ws.getRow(r).height = 20; r++;
+      ['기종', '대수', '유류 사용량(L)', '유류 공급가액(원)', '사용시간(h)', '시간당 유류(L/h)', '시간당 유류비(원/h)', '월별 L/h 범위']
+        .forEach((h, i) => setc(ws, `${colName(i)}${r}`, h, { fill: HEAD, font: { bold: true, size: 9 }, wrap: true }));
+      ws.getRow(r).height = 30; r++;
+      const sumifs = (col, cls) => groups.filter((g) => g.list.some((e) => e.cls === cls)).map((g) => {
+        const sh = q(monthInfo[g.key].name); const e2 = 2 + g.list.length;
+        return `SUMIFS(${sh}${col}3:${col}${e2},${sh}B3:B${e2},"${cls.replace(/"/g, '""')}",${sh}C3:C${e2},">0",${sh}G3:G${e2},">0")`;
+      }).join('+') || '0';
+      for (const cls of model.classes) {
+        const c = model.classAvg[cls];
+        const plates = new Set(groups.flatMap((g) => g.list.filter((e) => e.cls === cls).map((e) => e.plate)));
+        const vals = Object.values(c.byGroup).map((b) => b.lph);
+        const lo = Math.min(...vals), hi = Math.max(...vals);
+        setc(ws, `A${r}`, cls, { font: { bold: true } });
+        setc(ws, `B${r}`, plates.size, { numFmt: '0"대"' });
+        setc(ws, `C${r}`, F(sumifs('C', cls), c.fuel), { numFmt: N0 });
+        setc(ws, `D${r}`, F(sumifs('E', cls), c.supply), { numFmt: N0 });
+        setc(ws, `E${r}`, F(sumifs('G', cls), c.hours), { numFmt: N1 });
+        setc(ws, `F${r}`, F(`IFERROR(C${r}/E${r},0)`, c.lph), { numFmt: N1, font: { bold: true } });
+        setc(ws, `G${r}`, F(`IFERROR(D${r}/E${r},0)`, c.wonph), { numFmt: N0 });
+        setc(ws, `H${r}`, vals.length > 1 ? `${round(lo, 1).toFixed(1)} ~ ${round(hi, 1).toFixed(1)}` : round(lo, 1).toFixed(1), { font: { size: 9 } });
+        ws.getRow(r).height = 18;
+        r++;
+      }
+      if (!model.classes.length) { note(ws, `A${r}:H${r}`, '유류와 작업시간이 모두 있는 장비가 없습니다.'); r++; }
+      r++;
+
+      // 3. 월별 추이 (그래프 자료는 K열~, 인쇄 범위 밖)
+      label(ws, `A${r}`, '3. 월별 추이'); ws.getRow(r).height = 20; r++;
+      const MC = 10;
+      const hr = mt0 - 1; // 그래프 자료 머리행을 월별 합계 머리행과 같은 줄에
+      setc(ws, `${colName(MC)}${hr}`, '기종 \\ 월 (L/h)', { fill: SUB, font: { size: 9, bold: true } });
+      ws.getColumn(MC + 1).width = 14;
+      groups.forEach((g, i) => { setc(ws, `${colName(MC + 1 + i)}${hr}`, g.short, { fill: SUB, font: { size: 9 } }); ws.getColumn(MC + 2 + i).width = 8; });
+      const lser = model.classes.map((cls, k) => {
+        const rr = hr + 1 + k;
+        setc(ws, `${colName(MC)}${rr}`, cls, { align: 'left', font: { size: 9 } });
+        const vals = groups.map((g, i) => {
+          const b = model.classAvg[cls].byGroup[g.key];
+          const a = `${colName(MC + 1 + i)}${rr}`;
+          if (!b) { setc(ws, a, null, { font: { size: 9 } }); return null; }
+          const sh = q(monthInfo[g.key].name); const e2 = 2 + g.list.length;
+          const cond = `${sh}B3:B${e2},"${cls.replace(/"/g, '""')}",${sh}C3:C${e2},">0",${sh}G3:G${e2},">0"`;
+          setc(ws, a, F(`IFERROR(SUMIFS(${sh}C3:C${e2},${cond})/SUMIFS(${sh}G3:G${e2},${cond}),0)`, b.lph), { numFmt: N1, font: { size: 9 } });
+          return round(b.lph, 2);
+        });
+        return { name: cls, nameRef: `$${colName(MC)}$${rr}`, valRef: `$${colName(MC + 1)}$${rr}:$${colName(MC + groups.length)}$${rr}`, values: vals, labels: '0.0' };
+      });
+      const CH = 15;
+      for (let x = r; x <= r + CH; x++) ws.getRow(x).height = 15;
+      const half = Math.floor(totalW / 2);
+      const L0 = colAt(ws, 0), L1 = colAt(ws, half - 4), R0 = colAt(ws, half + 4), R1 = colAt(ws, totalW);
+      if (groups.length) {
+        charts.push({
+          host: ws.name, anchor: { c1: L0.c, o1: L0.o, r1: r - 1, c2: L1.c, o2: L1.o, r2: r - 1 + CH },
+          xml: chartXml({
+            title: '월별 유류 공급가액 · 장비 사용금액 (백만원)', sheet: ws.name, catRef: `$A$${mt0}:$A$${mt1}`, cats: groups.map((g) => g.label),
+            bars: [
+              { name: '유류 공급가액', nameRef: `$D$${mt0 - 1}`, valRef: `$D$${mt0}:$D$${mt1}`, values: groups.map((g) => round(g.list.reduce((s, e) => s + e.supply, 0), 0)), color: 'E08E0B', labels: '#,##0.0,,' },
+              { name: '장비 사용금액', nameRef: `$F$${mt0 - 1}`, valRef: `$F$${mt0}:$F$${mt1}`, values: groups.map((g) => round(g.list.reduce((s, e) => s + e.hours * e.rate, 0), 0)), color: '1F5F8B', labels: '#,##0.0,,' },
+            ],
+            numFmt: '#,##0,,', gap: 70,
+          }),
+        });
+      }
+      if (lser.length) {
+        charts.push({
+          host: ws.name, anchor: { c1: R0.c, o1: R0.o, r1: r - 1, c2: R1.c, o2: R1.o, r2: r - 1 + CH },
+          xml: chartXml({ title: '기종별 시간당 유류사용량 (L/h)', sheet: ws.name, catRef: `$${colName(MC + 1)}$${hr}:$${colName(MC + groups.length)}$${hr}`, cats: groups.map((g) => g.short), lines: lser, numFmt: '#,##0' }),
+        });
+      }
+      r += CH + 1;
+
+      // 4. 점검 요약
+      label(ws, `A${r}`, '4. 점검 요약'); ws.getRow(r).height = 20; r++;
+      setc(ws, `A${r}`, '구분', { fill: HEAD, font: { bold: true, size: 9 } });
+      setc(ws, `B${r}`, '항목', { fill: HEAD, font: { bold: true, size: 9 } });
+      setc(ws, `C${r}`, '건수', { fill: HEAD, font: { bold: true, size: 9 } });
+      mset(ws, `D${r}:H${r}`, '내용', { fill: HEAD, font: { bold: true, size: 9 } });
+      r++;
+      const cnt = (k) => model.fills.filter((f) => f.judge === k).length;
+      const icnt = (k) => model.issues.filter((i) => i.level === k).length;
+      const rowsChk = [
+        ['주유 구간', '과다', cnt('과다'), '기종 평균 대비 150% 초과 사용한 주유 구간', JUDGE_FILL['과다']],
+        ['주유 구간', '과소', cnt('과소'), '기종 평균 대비 60% 미만 (작업 8시간 이상 구간)', JUDGE_FILL['과소']],
+        ['주유 구간', '확인', cnt('확인'), '투입 첫 주유 · 철수 전 · 월말 · 작업 전 주유', JUDGE_FILL['확인']],
+        ['자료 확인', '오류', icnt('error'), '차량번호 불일치, 비정상 L/h 등 바로 확인할 것', fill('FFF8CBAD')],
+        ['자료 확인', '주의', icnt('warn'), '작업일보 가산금 등 금액 확인이 필요한 것', fill('FFFFE699')],
+        ['자료 확인', '참고', icnt('info'), '참고 사항', undefined],
+      ];
+      const ck0 = r;
+      rowsChk.forEach(([a, b, n, d, f]) => {
+        setc(ws, `A${r}`, a, { font: { size: 9 } });
+        setc(ws, `B${r}`, b, { fill: f, font: { bold: true } });
+        setc(ws, `C${r}`, F(`COUNTIF(${q(cw.name)}$A:$A,"${b}")`, n), { numFmt: '0"건"', font: { bold: true } });
+        mset(ws, `D${r}:H${r}`, d, { align: 'left', font: { size: 9 } });
+        ws.getRow(r).height = 17;
+        r++;
+      });
+      ws.mergeCells(`A${ck0}:A${ck0 + 2}`);
+      ws.mergeCells(`A${ck0 + 3}:A${ck0 + 5}`);
+      r++;
+
+      // 5. 주요 확인 사항
+      const top = model.issues.filter((i) => i.level !== 'info').slice(0, 6);
+      const list = top.length ? top : model.issues.slice(0, 4);
+      label(ws, `A${r}`, '5. 주요 확인 사항 (자세한 내용은 "점검 결과" 시트)'); ws.getRow(r).height = 20; r++;
+      const LV = { error: '오류', warn: '주의', info: '참고' };
+      if (!list.length) { note(ws, `A${r}:H${r}`, '확인할 사항이 없습니다.'); r++; }
+      for (const i of list) {
+        setc(ws, `A${r}`, LV[i.level], { fill: i.level === 'error' ? fill('FFF8CBAD') : i.level === 'warn' ? fill('FFFFE699') : undefined, font: { bold: true, size: 9 } });
+        const text = `${i.title}  (${i.where})`;
+        mset(ws, `B${r}:H${r}`, text, { align: 'left', wrap: true, font: { size: 9 } });
+        const units = [...text].reduce((s, ch) => s + (ch.charCodeAt(0) > 255 ? 1.85 : 1), 0);
+        ws.getRow(r).height = Math.max(17, Math.ceil(units * 0.9 / 85) * 13 + 5);
+        r++;
+      }
+      r++;
+      note(ws, `A${r}:H${r}`, '※ 기종별 평균은 유류와 작업시간이 모두 있는 장비만으로 계산했습니다. 월별 상세는 각 월 시트, 장비별 상세는 "장비별 상세" 시트를 보세요.');
+      ws.getRow(r).height = 26;
+      ws.getCell(`A${r}`).alignment = { vertical: 'middle', horizontal: 'left', wrapText: true };
+      page(ws, { fit: true, fitH: 1, area: `A1:H${r}` });
+    }
+
+    // ---- 쓰기 + 그래프·인쇄 보정
     const buf = await wb.xlsx.writeBuffer();
-    if (!charts.length) return new Uint8Array(buf);
     const zip = await JSZip.loadAsync(buf);
-    const wbXml = await zip.file('xl/workbook.xml').async('string');
+    let wbXml = await zip.file('xl/workbook.xml').async('string');
+    // 인쇄 영역이 여러 개면 하나의 이름으로 합치기 (Excel 규칙)
+    const pa = {};
+    wbXml = wbXml.replace(/<definedName name="_xlnm\.Print_Area" localSheetId="(\d+)">([^<]*)<\/definedName>/g, (m0, id, ref) => { (pa[id] = pa[id] || []).push(ref.replace(/\$([A-Z]+)(\d+)/g, '$$$1$$$2')); return ''; });
+    const paXml = Object.entries(pa).map(([id, refs]) => `<definedName name="_xlnm.Print_Area" localSheetId="${id}">${refs.join(',')}</definedName>`).join('');
+    if (paXml) wbXml = /<\/definedNames>/.test(wbXml) ? wbXml.replace('</definedNames>', paXml + '</definedNames>') : wbXml.replace('</sheets>', `</sheets><definedNames>${paXml}</definedNames>`);
+    wbXml = wbXml.replace(/<definedNames><\/definedNames>/, '');
+    zip.file('xl/workbook.xml', wbXml);
+
     const relsXml = await zip.file('xl/_rels/workbook.xml.rels').async('string');
-    const sheetTag = wbXml.match(/<sheet [^>]*name="장비별 평균"[^>]*>/)[0];
-    const rid = sheetTag.match(/r:id="([^"]+)"/)[1];
-    const target = relsXml.match(new RegExp(`<Relationship[^>]*Id="${rid}"[^>]*>`))[0].match(/Target="([^"]+)"/)[1];
-    const sheetPath = 'xl/' + target.replace(/^\/?xl\//, '').replace(/^\//, '');
-    const sheetFile = sheetPath.split('/').pop();
-    const relsPath = `xl/worksheets/_rels/${sheetFile}.rels`;
-    let sheetXml = await zip.file(sheetPath).async('string');
-    let sheetRels = zip.file(relsPath) ? await zip.file(relsPath).async('string')
-      : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
-    const drawName = 'drawingFuel1.xml';
-    sheetRels = sheetRels.replace('</Relationships>', `<Relationship Id="rIdFuelDrw" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/${drawName}"/></Relationships>`);
-    zip.file(relsPath, sheetRels);
-    if (!/xmlns:r=/.test(sheetXml.slice(0, 600))) sheetXml = sheetXml.replace('<worksheet ', '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
-    const tagD = '<drawing r:id="rIdFuelDrw"/>';
-    const m = sheetXml.match(/<(legacyDrawing|legacyDrawingHF|picture|oleObjects|controls|webPublishItems|tableParts|extLst)[\s>\/]/);
-    sheetXml = m ? sheetXml.replace(m[0], tagD + m[0]) : sheetXml.replace('</worksheet>', tagD + '</worksheet>');
-    zip.file(sheetPath, sheetXml);
-    zip.file(`xl/drawings/${drawName}`, drawingXml(charts.map((c) => c.anchor)));
-    zip.file(`xl/drawings/_rels/${drawName}.rels`, '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' +
-      charts.map((c, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chartFuel${i + 1}.xml"/>`).join('') + '</Relationships>');
-    charts.forEach((c, i) => zip.file(`xl/charts/chartFuel${i + 1}.xml`, c.xml));
-    let ct = await zip.file('[Content_Types].xml').async('string');
-    ct = ct.replace('</Types>', `<Override PartName="/xl/drawings/${drawName}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>` +
-      charts.map((c, i) => `<Override PartName="/xl/charts/chartFuel${i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`).join('') + '</Types>');
-    zip.file('[Content_Types].xml', ct);
+    const pathOf = (name) => {
+      const tag = [...wbXml.matchAll(/<sheet [^>]*>/g)].map((x) => x[0]).find((t) => t.includes(`name="${esc(name)}"`));
+      const rid = tag.match(/r:id="([^"]+)"/)[1];
+      const target = relsXml.match(new RegExp(`<Relationship[^>]*Id="${rid}"[^>]*>`))[0].match(/Target="([^"]+)"/)[1];
+      return 'xl/' + target.replace(/^\/?xl\//, '').replace(/^\//, '');
+    };
+    const LATER = /<(customProperties|cellWatches|ignoredErrors|smartTags|drawing|legacyDrawing|legacyDrawingHF|picture|oleObjects|controls|webPublishItems|tableParts|extLst)[\s>\/]/;
+    const insertBefore = (xml, tag) => { const m = xml.match(LATER); return m ? xml.replace(m[0], tag + m[0]) : xml.replace('</worksheet>', tag + '</worksheet>'); };
+    for (const [name, ids] of Object.entries(colBreaks)) {
+      if (!ids.length) continue;
+      const p = pathOf(name);
+      const xml = await zip.file(p).async('string');
+      zip.file(p, insertBefore(xml, `<colBreaks count="${ids.length}" manualBreakCount="${ids.length}">${ids.map((id) => `<brk id="${id}" max="1048575" man="1"/>`).join('')}</colBreaks>`));
+    }
+    if (charts.length) {
+      let ct = await zip.file('[Content_Types].xml').async('string');
+      let no = 0;
+      const hosts = [...new Set(charts.map((c) => c.host))];
+      for (const [hi, host] of hosts.entries()) {
+        const list = charts.filter((c) => c.host === host);
+        const sheetPath = pathOf(host);
+        const sheetFile = sheetPath.split('/').pop();
+        const relsPath = `xl/worksheets/_rels/${sheetFile}.rels`;
+        let sheetXml = await zip.file(sheetPath).async('string');
+        let sheetRels = zip.file(relsPath) ? await zip.file(relsPath).async('string')
+          : '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"></Relationships>';
+        const drawName = `drawingFuel${hi + 1}.xml`;
+        sheetRels = sheetRels.replace('</Relationships>', `<Relationship Id="rIdFuelDrw" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/drawing" Target="../drawings/${drawName}"/></Relationships>`);
+        zip.file(relsPath, sheetRels);
+        if (!/xmlns:r=/.test(sheetXml.slice(0, 800))) sheetXml = sheetXml.replace('<worksheet ', '<worksheet xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" ');
+        const m = sheetXml.match(/<(legacyDrawing|legacyDrawingHF|picture|oleObjects|controls|webPublishItems|tableParts|extLst)[\s>\/]/);
+        const tagD = '<drawing r:id="rIdFuelDrw"/>';
+        sheetXml = m ? sheetXml.replace(m[0], tagD + m[0]) : sheetXml.replace('</worksheet>', tagD + '</worksheet>');
+        zip.file(sheetPath, sheetXml);
+        zip.file(`xl/drawings/${drawName}`, drawingXml(list.map((c) => c.anchor)));
+        const rels = list.map((c, i) => `<Relationship Id="rId${i + 1}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/chart" Target="../charts/chartFuel${no + i + 1}.xml"/>`).join('');
+        zip.file(`xl/drawings/_rels/${drawName}.rels`, `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>\n<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">${rels}</Relationships>`);
+        list.forEach((c, i) => zip.file(`xl/charts/chartFuel${no + i + 1}.xml`, c.xml));
+        ct = ct.replace('</Types>', `<Override PartName="/xl/drawings/${drawName}" ContentType="application/vnd.openxmlformats-officedocument.drawing+xml"/>` +
+          list.map((c, i) => `<Override PartName="/xl/charts/chartFuel${no + i + 1}.xml" ContentType="application/vnd.openxmlformats-officedocument.drawingml.chart+xml"/>`).join('') + '</Types>');
+        no += list.length;
+      }
+      zip.file('[Content_Types].xml', ct);
+    }
     return zip.generateAsync({ type: 'uint8array', compression: 'DEFLATE' });
   }
 
@@ -1091,16 +1714,18 @@ td.other{color:var(--accent-ink)}
     } else box.innerHTML = m ? '<p class="help">경유대장과 작업일보의 차량번호가 모두 맞습니다.</p>' : '';
     // 출력 목록
     $('outlist').innerHTML = m ? [
+      '<li><b>총괄 요약</b> — 월별 합계 · 기종별 평균 · 점검 요약 · 그래프 2개 (A4 한 장, 결재란)</li>',
       `<li><b>장비별 평균</b> — 기종 ${m.classes.length}개 표 + 그래프 ${m.classes.length * 2}개</li>`,
-      ...m.groups.map((g) => `<li><b>${esc(g.label)}</b> 대조표 — 장비 ${g.list.length}대</li>`),
+      ...m.groups.map((g) => `<li><b>${esc(g.label)}</b> 대조표 — 장비 ${g.list.length}대 · 기종 평균 대비 비교</li>`),
+      `<li><b>장비별 상세</b> — ${m.totals.equip}대, 장비마다 새 쪽 (월별 실적 · 일별 그래프 · 주유 내역)</li>`,
       '<li><b>작업일보 청구 대조</b>, <b>점검 결과</b>, <b>읽은 자료</b></li>',
     ].join('') : '<li>원자료를 올리면 만들 시트가 여기에 표시됩니다.</li>';
     const ok = !!m && !!window.ExcelJS && !!window.JSZip;
     $('exportBtn').disabled = !ok || !downloads;
-    $('exportHelp').textContent = !m ? '수식이 살아 있는 엑셀로 만듭니다. 그래프는 "장비별 평균" 시트에 들어갑니다.'
+    $('exportHelp').textContent = !m ? '수식이 살아 있는 엑셀로 만듭니다. A4 인쇄 설정(쪽 나눔 · 머리글 · 쪽 번호)까지 들어갑니다.'
       : !window.ExcelJS || !window.JSZip ? '엑셀 만들기 도구를 불러오지 못했습니다. 새로고침해 보세요.'
       : !downloads ? '이 화면에서는 파일 저장을 쓸 수 없습니다. claude.ai에서 페이지를 열어 주세요.'
-      : `${m.groups.map((g) => g.label).join(', ')} · 수식이 살아 있는 엑셀로 만듭니다.`;
+      : `${m.groups.map((g) => g.label).join(', ')} · 수식이 살아 있는 엑셀, A4 인쇄용으로 만듭니다.`;
   }
 
   // ---------- result
