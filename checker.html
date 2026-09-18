@@ -139,18 +139,24 @@ tr.avg td{font-weight:700}
 .foot{color:var(--muted);font-size:12.5px;max-width:80ch}
 .foot li{margin-block:2px}
 @media (prefers-reduced-motion: reduce){*{transition:none!important}}
+
+.nav{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px}
+.nav a{color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;padding-bottom:2px}
+.nav a:hover{color:var(--ink)}
+.nav a[aria-current="page"]{color:var(--ink);font-weight:700;border-bottom-color:var(--accent)}
 </style>
 </head>
 <body>
 
 
 <div class="wrap">
+  
+  <nav class="nav" aria-label="프로그램"><a href="index.html">유류대 대조표 생성기</a> <a href="materials.html">자재 거래명세서 정리기</a> <a href="fund.html">자금청구서 점검기</a> <a href="#" aria-current="page">유류대 점검기</a></nav>
   <header class="top">
     <div>
       <div class="eyebrow">경유사용집계표 · 작업일보 · 월별 대조표</div>
       <h1>현장 유류대 점검기</h1>
       <p class="lede">현장 유류사용량 정리 엑셀을 올리면 장비별 시간당 사용량, 이상 주유, 수식·숫자 불일치를 바로 찾아 줍니다.</p>
-      <p class="lede"><a href="index.html" style="color:var(--accent-ink)">원자료로 대조표 만들기 (대조표 생성기) →</a></p>
     </div>
     <span class="lock"><i></i>파일은 이 브라우저 안에서만 읽고 어디에도 보내지 않습니다</span>
   </header>

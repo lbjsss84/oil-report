@@ -181,19 +181,24 @@ details.daily summary{cursor:pointer;font-weight:500;padding:4px 0}
 .daily table td,.daily table th{padding:4px 7px;font-size:12px}
 td.other{color:var(--accent-ink)}
 .empty{padding:28px;text-align:center;color:var(--muted)}
+
+.nav{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:13px}
+.nav a{color:var(--muted);text-decoration:none;border-bottom:2px solid transparent;padding-bottom:2px}
+.nav a:hover{color:var(--ink)}
+.nav a[aria-current="page"]{color:var(--ink);font-weight:700;border-bottom-color:var(--accent)}
 </style>
 </head>
 <body>
 
 
 <div class="wrap">
+  
+  <nav class="nav" aria-label="프로그램"><a href="#" aria-current="page">유류대 대조표 생성기</a> <a href="materials.html">자재 거래명세서 정리기</a> <a href="fund.html">자금청구서 점검기</a> <a href="checker.html">유류대 점검기</a></nav>
   <header class="top">
     <div>
       <div class="eyebrow">장비작업일보 + 경유사용집계표 → 유류대 및 장비비 대조표</div>
       <h1>유류대 대조표 생성기</h1>
       <p class="lede">원자료 엑셀 두 가지를 올리면 월별 대조표, 장비별 평균(월별 유류사용량·시간당 사용량), 그래프가 들어간 엑셀을 만들어 줍니다.</p>
-      <p class="lede"><a href="checker.html" style="color:var(--accent-ink)">완성된 정리 파일 점검하기 (유류대 점검기) →</a></p>
-      <p class="lede"><a href="materials.html" style="color:var(--accent-ink)">자재 거래명세서 정리하기 (자재 거래명세서 정리기) →</a></p>
     </div>
     <span class="lock"><i></i>파일은 이 브라우저 안에서만 읽고 어디에도 보내지 않습니다</span>
   </header>
