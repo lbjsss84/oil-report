@@ -198,11 +198,11 @@ td.ok{color:var(--ok)}
       <div class="drop" id="drop">
         <div class="what">
           <strong>자금청구서 파일을 여기에 끌어다 놓으세요</strong>
-          <span>엑셀(.xls · .xlsx). 여러 달을 한꺼번에 올리면 달마다 흐름도 봅니다. 작업일보·경유사용집계표가 같은 파일(또는 따로) 있으면 유류비·장비비도 대조합니다.</span>
+          <span>엑셀(.xls · .xlsx) · PDF · 사진(jpg/png). 여러 달을 한꺼번에 올리면 달마다 흐름도 봅니다. 작업일보·경유사용집계표가 같은 파일(또는 따로) 있으면 유류비·장비비도 대조합니다.<br><b>PDF·사진</b>은 적힌 숫자로 검산·대조만 합니다 (수식이 없어 수정본은 엑셀에서만 만듭니다).</span>
         </div>
         <div class="actions">
           <label class="btn primary" for="file">파일 선택</label>
-          <input id="file" type="file" accept=".xlsx,.xlsm,.xls" multiple hidden>
+          <input id="file" type="file" accept=".xlsx,.xlsm,.xls,.pdf,.jpg,.jpeg,.png,.webp" multiple hidden>
           <button class="btn" type="button" id="sampleBtn">예시 자료로 보기</button>
         </div>
       </div>
@@ -328,6 +328,164 @@ td.ok{color:var(--ok)}
     };
   }
 
+  // 표 한 장(2차원 배열)을 시트처럼 — PDF·스캔본에서 읽은 자금청구서용 (수식은 없음)
+  function sheetFromGrid(grid) {
+    const rows = grid.length;
+    const cols = grid.reduce((n, r) => Math.max(n, r ? r.length : 0), 0);
+    const get = (r, c) => { const row = grid[r - 1]; const v = row ? row[colIdx(c)] : null; return v === undefined ? null : v; };
+    return { rows, cols, v: get, err: () => false, f: () => null, cell: (r, c) => ({ v: get(r, c) }), grid };
+  }
+
+  // ---------------- PDF에서 자금청구서 표 읽기
+  const LABELS = ['공급가액', '부가세', '합계', '거래처', '입금계좌', '은행명', '계좌번호', '예금주', '상호', '성명', '번호', '구분', '비고', '총계', '금액', '적요', '내역'];
+  // 글자 조각을 줄로 묶고, 한 줄 안에서 가까운 조각을 합침
+  function pdfRows(items) {
+    items.sort((a, b) => b.y - a.y || a.x - b.x);
+    const rows = [];
+    for (const it of items) {
+      const row = rows.find((r) => Math.abs(r.y - it.y) <= Math.max(2, Math.min(r.h, it.h) * 0.45));
+      if (row) { row.items.push(it); row.h = Math.max(row.h, it.h); } else rows.push({ y: it.y, h: it.h, items: [it] });
+    }
+    rows.sort((a, b) => b.y - a.y);
+    for (const row of rows) {
+      row.items.sort((a, b) => a.x - b.x);
+      const toks = [];
+      for (const it of row.items) {
+        const last = toks[toks.length - 1];
+        const cw = it.s.length ? it.w / it.s.length : it.h * 0.5;
+        const gap = last ? it.x - last.x1 : 0;
+        const nA = last && num(last.s) !== null, nB = num(it.s) !== null;
+        const limit = nA && nB ? -1 : nA !== nB ? cw * 0.05 : Math.max(1, cw * 0.3);
+        if (last && gap < limit) { last.s += (gap > cw * 0.15 ? ' ' : '') + it.s; last.x1 = it.x + it.w; }
+        else toks.push({ s: it.s, x0: it.x, x1: it.x + it.w });
+      }
+      // "공 급 가 액"처럼 띄어 쓴 머리글 붙이기
+      for (let i = 0; i < toks.length; i++) {
+        for (let j = Math.min(toks.length - 1, i + 5); j > i; j--) {
+          const joined = squash(toks.slice(i, j + 1).map((t) => t.s).join(''));
+          if (LABELS.includes(joined)) {
+            toks[i] = { s: joined, x0: toks[i].x0, x1: toks[j].x1 };
+            toks.splice(i + 1, j - i);
+            break;
+          }
+        }
+      }
+      row.toks = toks;
+    }
+    return rows;
+  }
+  const overlaps = (a, b) => a.x0 < b.x1 - 1 && b.x0 < a.x1 - 1;
+  function pdfPageGrid(rows, prev) {
+    const lab = (t) => clean(t.s);
+    let headIdx = -1;
+    for (let i = 0; i < rows.length; i++) {
+      const ls = rows[i].toks.map(lab);
+      if (ls.includes('공급가액') && (ls.includes('부가세') || ls.includes('합계'))) { headIdx = i; break; }
+    }
+    let anchors = prev || null, grid = [], head = null, aboveIdx = -1;
+    if (headIdx >= 0) {
+      // 합쳐진 칸(거래처·입금계좌)은 인쇄하면 한 줄 위에 따로 찍히기도 합니다
+      const above = rows[headIdx - 1];
+      const extra = above && above.toks.length && above.toks.length <= 10
+        && above.toks.some((t) => ['거래처', '입금계좌'].includes(clean(t.s))) ? above.toks : [];
+      if (extra.length) aboveIdx = headIdx - 1;
+      const H = [...rows[headIdx].toks, ...extra];
+      const next = rows[headIdx + 1];
+      const subs = next && next.toks.some((t) => ['상호', '성명', '은행명', '계좌번호', '예금주'].includes(lab(t))) ? next.toks : [];
+      const keep = H.filter((h) => !subs.some((s) => overlaps(h, s)));
+      anchors = [...keep, ...subs].sort((a, b) => a.x0 - b.x0).map((t) => ({ x0: t.x0, x1: t.x1, s: t.s }));
+      head = { parent: anchors.map((a) => (subs.includes(a) ? '' : a.s)), sub: anchors.map(() => '') };
+      // 상위 머리글(거래처·입금계좌)을 하위 칸 위에 얹기
+      anchors.forEach((a, i) => {
+        const s = subs.find((x) => x.x0 === a.x0 && x.x1 === a.x1);
+        if (!s) { head.parent[i] = a.s; return; }
+        head.sub[i] = a.s;
+        const p = H.find((h) => overlaps(h, a));
+        head.parent[i] = p ? p.s : '';
+      });
+    }
+    const place = (toks) => {
+      const cells = new Array(anchors.length).fill(null);
+      for (const t of toks) {
+        let best = 0;
+        if (num(t.s) !== null) anchors.forEach((a, i) => { if (a.x0 < t.x1 - 1) best = i; });
+        else {
+          let bestO = -Infinity;
+          anchors.forEach((a, i) => {
+            const lo = i ? (anchors[i - 1].x1 + a.x0) / 2 : -Infinity;
+            const hi = i < anchors.length - 1 ? (a.x1 + anchors[i + 1].x0) / 2 : Infinity;
+            const o = Math.min(t.x1, hi) - Math.max(t.x0, lo);
+            if (o > bestO) { bestO = o; best = i; }
+          });
+        }
+        cells[best] = cells[best] === null ? t.s : `${cells[best]} ${t.s}`;
+      }
+      return cells;
+    };
+    rows.forEach((row, i) => {
+      if (i === aboveIdx) return;
+      if (headIdx >= 0 && i === headIdx) { grid.push(head.parent.slice(), head.sub.slice()); return; }
+      if (headIdx >= 0 && i === headIdx + 1 && head.sub.some(Boolean)) return;   // 하위 머리글 줄은 이미 넣음
+      if (i < headIdx || !anchors) { grid.push(row.toks.map((t) => t.s)); return; }
+      const ls = row.toks.map(lab);
+      if (ls.includes('공급가액') || (ls.includes('상호') && ls.includes('성명'))) return;  // 쪽마다 반복되는 머리글
+      grid.push(place(row.toks));
+    });
+    return { grid, anchors };
+  }
+  async function readFundPdf(pdfjsLib, data, fileName, opts = {}) {
+    const doc = await pdfjsLib.getDocument({ data, isEvalSupported: false, disableFontFace: true, useSystemFonts: false, ...(opts.pdfParams || {}) }).promise;
+    const out = { grid: [], scanPages: [], pageCount: doc.numPages, chars: 0, headFound: false };
+    let anchors = null;
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const tc = await page.getTextContent();
+      const items = tc.items.filter((it) => it.str && it.str.trim()).map((it) => ({
+        s: it.str, x: it.transform[4], y: it.transform[5], w: it.width || 0, h: Math.abs(it.transform[3]) || it.height || 8,
+      }));
+      const chars = items.reduce((n, it) => n + it.s.replace(/\s/g, '').length, 0);
+      out.chars += chars;
+      if (!chars) { out.scanPages.push(p); continue; }
+      const r = pdfPageGrid(pdfRows(items), anchors);
+      if (r.anchors) { anchors = r.anchors; out.headFound = true; }
+      out.grid.push(...r.grid);
+    }
+    return out;
+  }
+
+  // ---------------- 스캔본(사진·그림 PDF): Claude가 읽은 JSON → 표
+  const FUND_SCAN_PROMPT = [
+    '이 이미지는 한국 건설현장의 "자금청구서"(집계표) 한 장입니다.',
+    '표에 적힌 내용을 빠짐없이 읽어 JSON 하나로만 답하세요. 설명 문장은 쓰지 마세요.',
+    '형식: {"site":"현장명","period":"기간 그대로","year":연도4자리,"month":월,',
+    ' "total":{"supply":공급가액,"vat":부가세,"total":합계},',
+    ' "sections":[{"label":"1. 노무비 처럼 번호와 이름","supply":공급가액,"vat":부가세,"total":합계,',
+    '   "rows":[{"kind":"구분","vendor":"상호","person":"성명","supply":숫자,"vat":숫자,"total":숫자,"bank":"은행명","acct":"계좌번호","owner":"예금주","note":"비고"}]}]}',
+    '- 숫자는 쉼표 없이. 빈 칸은 null. 비목(1. ○○비) 줄은 sections의 label·합계로, 그 아래 업체 줄은 rows에 넣으세요.',
+    '- 맨 위 "총계" 줄은 total에 넣고 sections에는 넣지 마세요.',
+    '- 계좌번호는 보이는 그대로 적으세요. 읽기 어려우면 null.',
+  ].join('\n');
+  function fundGridFromScan(json, meta = {}) {
+    const j = json || {};
+    const g = [];
+    const row = (arr) => g.push(arr);
+    row([txt(j.site) ? `현장명 : ${txt(j.site)}` : '자금청구서']);
+    row([txt(j.period) || '']);
+    row([j.year && j.month ? `(${String(j.year).slice(2)}.${pad2(j.month)}월)` : (meta.hint || '')]);
+    row([]);
+    row(['번호', '구분', '거래처', '', '공급가액', '부가세', '합계', '입금계좌', '', '', '비고']);
+    row(['', '', '상호', '성명', '', '', '', '은행명', '계좌번호', '예금주', '']);
+    const T = j.total || {};
+    row(['총 계', '', '', '', num(T.supply), num(T.vat), num(T.total), '', '', '', '']);
+    for (const s of Array.isArray(j.sections) ? j.sections : []) {
+      row([txt(s.label), '', '', '', num(s.supply), num(s.vat), num(s.total), '', '', '', '']);
+      for (const r of Array.isArray(s.rows) ? s.rows : []) {
+        row(['', txt(r.kind), txt(r.vendor), txt(r.person), num(r.supply), num(r.vat), num(r.total), txt(r.bank), txt(r.acct), txt(r.owner), txt(r.note)]);
+      }
+    }
+    return g;
+  }
+
   const SECTION_RE = /^\s*\d+\s*[.．]\s*\S/;
   const TOTAL_RE = /^(총계금액|총계|총합계|합계)$/;
   const FREE_RE = /노무비|직원|인건비/; // 면세(부가세 없음)
@@ -336,10 +494,17 @@ td.ok{color:var(--ok)}
   function readFund(XLSX, wb, fileName, opts = {}) {
     const issues = [];
     const issue = (level, where, title, detail, fix) => issues.push({ level, where, title, detail, fix, file: fileName });
+    // 자료가 엑셀(수식 있음)인지, PDF·사진에서 읽은 표(수식 없음)인지
+    const fromGrid = !!opts.grid;
+    const gridName = opts.sheetName || '청구서';
+    const names = fromGrid ? [gridName] : wb.SheetNames.slice();
+    const gridSheet = fromGrid ? sheetFromGrid(opts.grid) : null;
+    const getSheet = (n) => (fromGrid ? (n === gridName ? gridSheet : null) : (wb.Sheets[n] ? readSheet(XLSX, wb.Sheets[n]) : null));
     // 1) 집계표 시트 찾기
-    let mainName = wb.SheetNames.find((n) => /자금\s*청구서.*집계|청구서\s*집계/.test(n));
+    let mainName = fromGrid ? gridName : names.find((n) => /자금\s*청구서.*집계|청구서\s*집계/.test(n));
     const looksMain = (name) => {
-      const s = readSheet(XLSX, wb.Sheets[name]);
+      const s = getSheet(name);
+      if (!s) return 0;
       for (let r = 1; r <= Math.min(20, s.rows); r++) {
         const row = [];
         for (let c = 0; c < Math.min(20, s.cols); c++) row.push(clean(s.v(r, colName(c))));
@@ -347,12 +512,12 @@ td.ok{color:var(--ok)}
       }
       return 0;
     };
-    if (!mainName) mainName = wb.SheetNames.find((n) => looksMain(n));
+    if (!mainName) mainName = names.find((n) => looksMain(n));
     if (!mainName) {
       issue('error', fileName, '자금청구서 집계표를 찾지 못했습니다', '"공급가액 · 부가세 · 입금계좌" 머리행이 있는 시트를 찾습니다. 다른 양식이면 알려 주세요.');
       return { fileName, issues, ok: false };
     }
-    const S = readSheet(XLSX, wb.Sheets[mainName]);
+    const S = getSheet(mainName);
     const headRow = looksMain(mainName) || 7;
     const col = {};
     for (let c = 0; c < S.cols; c++) {
@@ -375,10 +540,19 @@ td.ok{color:var(--ok)}
     if (!col.vendor) col.vendor = 'C';
     // 2) 현장·기간
     let site = '', period = '';
+    const PERIOD_RE = /(20\d{2})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})\s*~\s*(20\d{2})?[.\-/]?\s*(\d{1,2})[.\-/]\s*(\d{1,2})/;
+    const tidy = (t) => txt(t).replace(/^\s*[:：]\s*/, '').replace(/\s+/g, ' ').trim();
     for (let r = 1; r <= Math.min(12, S.rows); r++) for (let c = 0; c < Math.min(24, S.cols); c++) {
       const t = txt(S.v(r, colName(c)));
-      if (!site && /현장명/.test(t)) site = t.replace(/^.*현장명\s*[:：]?\s*/, '').trim();
-      if (!period) { const m = t.match(/(20\d{2})[.\-/]\s*(\d{1,2})[.\-/]\s*(\d{1,2})\s*~\s*(20\d{2})?[.\-/]?\s*(\d{1,2})[.\-/]\s*(\d{1,2})/); if (m) period = t.trim(); }
+      if (!site && /현장명\s*[:：]?\s*\S/.test(t)) site = tidy(t.replace(/^.*현장명\s*[:：]?\s*/, ''));
+      if (!period && PERIOD_RE.test(t)) period = tidy(t);
+    }
+    // PDF에서 "현장명" / ": 이름" 이 다른 칸으로 읽힌 경우 줄 전체로 다시 찾기
+    if (!site) for (let r = 1; r <= Math.min(12, S.rows) && !site; r++) {
+      const cells = [];
+      for (let c = 0; c < Math.min(24, S.cols); c++) cells.push(txt(S.v(r, colName(c))));
+      const line = cells.join(' ').replace(/\s+/g, ' ').trim();
+      if (/현장명/.test(line)) site = tidy(line.replace(/^.*현장명\s*[:：]?\s*/, '').replace(/\s*기간\s*[:：].*$/, '').replace(/\s*20\d{2}\s*[.\-/].*$/, ''));
     }
     let month = null, year = null;
     for (let r = 1; r <= Math.min(8, S.rows); r++) for (let c = 0; c < Math.min(24, S.cols); c++) {
@@ -392,7 +566,9 @@ td.ok{color:var(--ok)}
     let totalRow = 0;
     const secs = [];
     for (let r = headRow + 1; r <= S.rows; r++) {
-      const a = txt(S.v(r, 'A')).trim();
+      let a = txt(S.v(r, 'A')).trim();
+      // PDF에서 "2." 와 "장비임대료"가 다른 칸으로 읽힌 경우 붙여 줍니다
+      if (/^\d+\s*[.．]$/.test(a)) { const b = txt(S.v(r, 'B')).trim(); if (b) a = `${a} ${b}`; }
       if (!a) continue;
       if (!totalRow && /총\s*계/.test(a)) totalRow = r;
       else if (SECTION_RE.test(a)) secs.push({ row: r, label: a.replace(/\s+/g, ' ').trim() });
@@ -439,7 +615,8 @@ td.ok{color:var(--ok)}
       supply: num(S.v(totalRow, col.supply)) || 0, vat: col.vat ? (num(S.v(totalRow, col.vat)) || 0) : 0, total: num(S.v(totalRow, col.total)) || 0,
       fSupply: S.f(totalRow, col.supply), fVat: col.vat ? S.f(totalRow, col.vat) : null, fTotal: S.f(totalRow, col.total), row: totalRow,
     };
-    return { fileName, ok: true, wbNames: wb.SheetNames.slice(), main: mainName, headRow, col, site, period, month, year, secs, rows, grand, issues, sheetOf: (n) => readSheet(XLSX, wb.Sheets[n]), S };
+    return { fileName, ok: true, fromGrid, wbNames: names, main: mainName, headRow, col, site, period, month, year, secs, rows, grand, issues,
+             sheetOf: getSheet, hasSheet: (n) => !!getSheet(n), S };
   }
 
   // ---------------- 검산
@@ -461,8 +638,15 @@ td.ok{color:var(--ok)}
     // 1) 총계 수식이 섹션을 빠뜨림
     for (const [key, label] of [['fSupply', '공급가액'], ['fVat', '부가세'], ['fTotal', '합계']]) {
       const f = fund.grand[key];
-      if (!f) continue;
       const cl = key === 'fSupply' ? C.supply : key === 'fVat' ? C.vat : C.total;
+      {
+        // 수식이 없어도(PDF에서 읽은 청구서) 숫자끼리는 맞춰 봅니다
+        const sum = fund.secs.reduce((s, x) => s + (key === 'fSupply' ? x.supply : key === 'fVat' ? x.vat : x.total), 0);
+        const gv = key === 'fSupply' ? fund.grand.supply : key === 'fVat' ? fund.grand.vat : fund.grand.total;
+        if (cl && fund.secs.length && Math.abs(sum - gv) > 0.6)
+          add('error', W(`${cl}${fund.grand.row}`), `총계 ${label} ${money(gv)} ≠ 항목 합 ${money(sum)}`, `차이 ${money(gv - sum)}원`);
+      }
+      if (!f) continue;
       const used = refsOf(f).filter((x) => !x.sheet).map((x) => x.row);
       const miss = fund.secs.filter((s) => !used.includes(s.row));
       if (miss.length) {
@@ -471,9 +655,6 @@ td.ok{color:var(--ok)}
           `${f} — 그 항목에 금액을 넣어도 총계에 더해지지 않습니다.`, { sheet: M, cell: `${cl}${fund.grand.row}`, formula: fixed, why: `총계 수식에 ${miss.map((s) => s.label).join(', ')} 항목을 더함` });
       }
       if (/ROUNDUP|ROUNDDOWN/i.test(f)) add('info', W(`${cl}${fund.grand.row}`), '총계에 올림·내림이 걸려 있음', `${f} — 항목 합계와 1원까지 다를 수 있습니다.`);
-      const sum = fund.secs.reduce((s, x) => s + (key === 'fSupply' ? x.supply : key === 'fVat' ? x.vat : x.total), 0);
-      const gv = key === 'fSupply' ? fund.grand.supply : key === 'fVat' ? fund.grand.vat : fund.grand.total;
-      if (Math.abs(sum - gv) > 0.6) add('error', W(`${cl}${fund.grand.row}`), `총계 ${label} ${money(gv)} ≠ 항목 합 ${money(sum)}`, `차이 ${money(gv - sum)}원`);
     }
     // 2) 섹션 합계 범위·값
     for (const sec of fund.secs) {
@@ -488,6 +669,11 @@ td.ok{color:var(--ok)}
           let s = 0;
           for (let r = rg.from; r <= rg.to; r++) s += n0(S.v(r, cl));
           if (Math.abs(s - v) > 0.6) add('error', W(`${cl}${sec.row}`), `${sec.label} ${label} 합계 ${money(v)} ≠ 범위 합 ${money(s)}`, f);
+        } else if (sec.rows.length) {
+          const k = key === 'fSupply' ? 'supply' : key === 'fVat' ? 'vat' : 'total';
+          const s = sec.rows.reduce((x, l) => x + l[k], 0);
+          if ((v || s) && Math.abs(s - v) > 0.6)
+            add('error', W(`${cl}${sec.row}`), `${sec.label} ${label} ${money(v)} ≠ 아래 줄 합 ${money(s)}`, `차이 ${money(v - s)}원 — 빠진 줄이나 잘못 더한 줄이 있는지 보세요.`);
         }
       }
       const keys = Object.keys(rs);
@@ -528,7 +714,7 @@ td.ok{color:var(--ok)}
     }
     // 4) 비목 집계표와 대조
     for (const sec of fund.secs) {
-      if (!sec.subSheet || !wb.Sheets[sec.subSheet]) continue;
+      if (!sec.subSheet || !fund.hasSheet(sec.subSheet)) continue;
       const T = fund.sheetOf(sec.subSheet);
       // '계' 행 찾기
       let tr = 0;
@@ -701,10 +887,12 @@ td.ok{color:var(--ok)}
 
   // ---------------- 모델 (여러 달)
   function buildModel(funds, opts = {}) {
-    const files = funds.filter((f) => f.ok);
+    // 같은 달을 엑셀과 PDF로 함께 올린 경우, 달 흐름에는 엑셀 쪽만 씁니다
+    const files = funds.filter((f) => f.ok).slice().sort((a, b) => (a.fromGrid ? 1 : 0) - (b.fromGrid ? 1 : 0));
     const all = [];
     for (const f of files) {
       const key = f.year && f.month ? `${f.year}-${pad2(f.month)}` : f.fileName;
+      if (all.some((x) => x.key === key)) continue;
       all.push({ key, label: f.year && f.month ? `${String(f.year).slice(2)}년 ${f.month}월` : f.fileName, fund: f });
     }
     all.sort((a, b) => a.key.localeCompare(b.key));
@@ -1156,7 +1344,8 @@ td.ok{color:var(--ok)}
     return await wb.xlsx.writeBuffer();
   }
 
-  const api = { readFund, check, buildModel, matchEvidence, patchWorkbook, buildReport, fuelCompare, readSheet, colName, colIdx, money, pad2 };
+  const api = { readFund, check, buildModel, matchEvidence, patchWorkbook, buildReport, fuelCompare,
+                readFundPdf, fundGridFromScan, FUND_SCAN_PROMPT, sheetFromGrid, readSheet, colName, colIdx, money, pad2 };
   root.FundGen = api;
   if (typeof module !== 'undefined') module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);
@@ -3549,23 +3738,43 @@ td.ok{color:var(--ok)}
 
   // ---------- 파일 읽기
   const kindOf = (name) => (/\.pdf$/i.test(name) ? 'pdf' : /\.(jpe?g|png|webp)$/i.test(name) ? 'image' : /\.xls[xm]?$/i.test(name) ? 'excel' : null);
-  function readFundBook(b) {
-    if (!window.XLSX) throw new Error('엑셀 읽기 도구를 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침하세요.');
-    b.wb = XLSX.read(b.data, { type: 'array', cellFormula: true, cellStyles: true });
-    b.fund = F.readFund(XLSX, b.wb, b.name, {});
-    b.isXls = /\.xls$/i.test(b.name);
+  async function readFundBook(b) {
+    b.kind = kindOf(b.name);
+    if (b.kind === 'excel') {
+      if (!window.XLSX) throw new Error('엑셀 읽기 도구를 불러오지 못했습니다. 인터넷 연결을 확인하고 새로고침하세요.');
+      b.wb = XLSX.read(b.data, { type: 'array', cellFormula: true, cellStyles: true });
+      b.fund = F.readFund(XLSX, b.wb, b.name, {});
+      b.isXls = /\.xls$/i.test(b.name);
+      return;
+    }
+    if (b.kind === 'pdf') {
+      if (!window.pdfjsLib) throw new Error('PDF 읽기 도구를 불러오지 못했습니다. 새로고침해 보세요.');
+      const r = await F.readFundPdf(window.pdfjsLib, b.data.slice(0), b.name, { pdfParams });
+      b.pdf = r;
+      b.scanPages = r.scanPages.slice();
+      if (r.grid.length) {
+        const fund = F.readFund(null, null, b.name, { grid: r.grid, sheetName: 'PDF 청구서' });
+        if (fund.ok) { b.fund = fund; return; }
+      }
+      // 글자를 못 읽었거나 표를 못 찾음 → 그림으로 보고 Claude에게 맡길 수 있게
+      if (!b.scanPages.length) b.scanPages = Array.from({ length: r.pageCount }, (_, i) => i + 1);
+      b.fund = null;
+      return;
+    }
+    b.scanPages = [1];
+    b.fund = null;
   }
   async function addFunds(list) {
-    const files = [...list].filter((f) => /\.xls[xm]?$/i.test(f.name));
-    if (!files.length) { showMsg('자금청구서는 엑셀 파일(.xls · .xlsx)로 올려 주세요.', true); return; }
+    const files = [...list].filter((f) => kindOf(f.name));
+    if (!files.length) { showMsg('자금청구서는 엑셀·PDF·사진으로 올려 주세요.', true); return; }
     if (state.isSample) { state.books = []; state.ev = []; state.scans = {}; state.isSample = false; }
     const errs = [];
     showMsg('읽는 중…');
     for (const f of files) {
       try {
         state.books = state.books.filter((b) => b.name !== f.name);
-        const b = { name: f.name, data: new Uint8Array(await f.arrayBuffer()) };
-        readFundBook(b);
+        const b = { name: f.name, file: f, data: new Uint8Array(await f.arrayBuffer()) };
+        await readFundBook(b);
         state.books.push(b);
       } catch (e) { errs.push(`${f.name}: ${e.message || e}`); }
     }
@@ -3605,7 +3814,7 @@ td.ok{color:var(--ok)}
       state.books = []; state.ev = []; state.scans = {};
       for (const s of SAMPLES) {
         const b = { name: s.name, data: b64(s.b64) };
-        readFundBook(b);
+        await readFundBook(b);
         state.books.push(b);
       }
       for (const s of EVSAMPLES) {
@@ -3618,6 +3827,7 @@ td.ok{color:var(--ok)}
     } catch (e) { showMsg('예시를 읽지 못했습니다: ' + esc(e.message || e), true); }
   }
   const pendingPages = (b) => (b.parsed ? [...(b.parsed.scanPages || [])].filter((p) => !(state.scans[b.name] || {})[p]?.lines) : []);
+  const pendingFund = (b) => (b.fund ? [] : (b.scanPages || []));
 
   // ---------- 계산
   function recompute() {
@@ -3641,7 +3851,7 @@ td.ok{color:var(--ok)}
     // 유류 · 장비
     state.fuel = null;
     try {
-      const input = G.readInputs(XLSX, state.books.map((b) => ({ wb: b.wb, fileName: b.name })), {});
+      const input = G.readInputs(XLSX, state.books.filter((b) => b.wb).map((b) => ({ wb: b.wb, fileName: b.name })), {});
       if (input.fuel.length || input.diary.length) state.fuel = F.fuelCompare(primary(), G.buildModel(input, {}));
     } catch (e) { /* 유류 자료가 아니어도 그냥 넘어감 */ }
     // 증빙
@@ -3677,10 +3887,13 @@ td.ok{color:var(--ok)}
   function renderFiles() {
     $('flist').innerHTML = state.books.map((b, i) => {
       const f = b.fund;
-      const st = !f ? ['p-bad', '못 읽음'] : f.ok ? ['p-info', `${f.rows.length}줄`] : ['p-warn', '청구서 아님'];
+      const pend = (b.scanPages || []).length;
+      const st = !f ? (pend ? ['p-warn', `그림 ${pend}쪽`] : ['p-bad', '못 읽음']) : f.ok ? ['p-info', `${f.rows.length}줄`] : ['p-warn', '청구서 아님'];
       const when = f && f.ok && f.year ? `${String(f.year).slice(2)}년 ${f.month}월` : '';
+      const kind = b.kind === 'excel' ? (b.isXls ? '.xls' : '엑셀') : b.kind === 'pdf' ? 'PDF' : '사진';
       return `<div class="frow"><span>${esc(b.name)}</span>${when ? `<span class="pill p-mute">${esc(when)}</span>` : ''}` +
-        `<span class="pill ${st[0]}">${st[1]}</span>${b.isXls ? '<span class="pill p-mute">.xls</span>' : ''}` +
+        `<span class="pill p-mute">${kind}</span><span class="pill ${st[0]}">${st[1]}</span>` +
+        (f && f.ok && f.fromGrid ? '<span class="pill p-warn">검산만 (수정본 없음)</span>' : '') +
         (state.isSample ? '<span class="pill p-mute">예시</span>' : `<button type="button" class="x" data-rm="${i}" aria-label="${esc(b.name)} 빼기">×</button>`) + '</div>';
     }).join('');
     $('flist2').innerHTML = state.ev.map((b, i) => {
@@ -3693,21 +3906,29 @@ td.ok{color:var(--ok)}
     }).join('');
     renderScanBox();
   }
+  function scanJobs() {
+    const jobs = [];
+    for (const b of state.books) for (const p of pendingFund(b)) jobs.push({ b, p, what: 'fund' });
+    for (const b of state.ev) for (const p of pendingPages(b)) jobs.push({ b, p, what: 'ev' });
+    return jobs;
+  }
   function renderScanBox() {
     const box = $('scanbox');
-    const pend = state.ev.map((b) => ({ b, pages: pendingPages(b), notab: (b.parsed && b.parsed.noTablePages) || [] })).filter((x) => x.pages.length || x.notab.length);
-    if (!pend.length && !busy) { box.hidden = true; return; }
+    const jobs = scanJobs();
+    const notab = state.ev.map((b) => ({ b, notab: (b.parsed && b.parsed.noTablePages) || [] })).filter((x) => x.notab.length);
+    if (!jobs.length && !notab.length && !busy) { box.hidden = true; return; }
     box.hidden = false;
-    const total = pend.reduce((s, x) => s + x.pages.length, 0);
+    const total = jobs.length;
+    const what = jobs.some((j) => j.what === 'fund') ? (jobs.every((j) => j.what === 'fund') ? '자금청구서' : '자금청구서·증빙') : '증빙';
     if (!sample || !sampleImages) {
-      box.innerHTML = `<strong>스캔본 · 사진 ${total}쪽</strong><span class="help">이 화면에서는 스캔본을 읽을 수 없습니다.${CLAUDE_PAGE ? ` <a href="${esc(CLAUDE_PAGE)}" target="_blank" rel="noopener">claude.ai 페이지</a>에서 열면 Claude가 이미지에서 품목을 읽습니다.` : ' 엑셀이나 글자 PDF로 받아 올려 주세요.'}</span>`;
+      box.innerHTML = `<strong>그림으로 된 ${esc(what)} ${total}쪽</strong><span class="help">이 화면에서는 그림에서 숫자를 읽을 수 없습니다.${CLAUDE_PAGE ? ` <a href="${esc(CLAUDE_PAGE)}" target="_blank" rel="noopener">claude.ai 페이지</a>에서 열면 Claude가 읽습니다.` : ' 글자가 들어 있는 PDF나 엑셀로 받아 올려 주세요.'}</span>`;
       return;
     }
-    box.innerHTML = `<strong>스캔본 · 사진 ${total}쪽</strong>` +
-      `<span class="help">Claude가 이미지에서 거래처·품목·금액을 읽습니다. 쪽마다 수십 초 걸리고, 내 Claude 사용량이 쓰입니다.</span>` +
+    box.innerHTML = `<strong>그림으로 된 ${esc(what)} ${total}쪽</strong>` +
+      `<span class="help">Claude가 이미지에서 표를 읽습니다. 쪽마다 수십 초 걸리고, 내 Claude 사용량이 쓰입니다. 읽은 뒤 숫자를 원본과 한 번 대조하세요.</span>` +
       (busy ? `<span class="progress">${esc(busy.text)}</span><button class="btn stop" type="button" id="scanStop">멈추기</button>`
         : (total ? `<button class="btn primary" type="button" id="scanGo">Claude로 ${total}쪽 읽기</button>` : '') +
-          pend.filter((x) => x.notab.length).map((x) => `<span class="help">${esc(x.b.name)}: 표를 찾지 못한 쪽 ${x.notab.join(', ')} <button class="btn" type="button" data-notab="${esc(x.b.name)}">Claude로 읽기</button></span>`).join(''));
+          notab.map((x) => `<span class="help">${esc(x.b.name)}: 표를 찾지 못한 쪽 ${x.notab.join(', ')} <button class="btn" type="button" data-notab="${esc(x.b.name)}">Claude로 읽기</button></span>`).join(''));
   }
   function renderSteps() {
     const p = primary();
@@ -3715,15 +3936,20 @@ td.ok{color:var(--ok)}
     const cnt = { error: 0, warn: 0, info: 0 };
     state.issues.forEach((i) => cnt[i.level]++);
     const nf = activeFixes().length;
+    const noFix = state.books.filter((b) => b.fund && b.fund.ok && b.fund.fromGrid);
     $('outlist').innerHTML = ok ? [
-      `<li><b>수정본 엑셀</b> — 고를 수 있는 수정 ${state.fixes.length}곳 중 <b>${nf}곳</b>을 고쳐 저장${state.books.some((b) => b.isXls) ? ' (.xls는 .xlsx로 저장됩니다)' : ''}</li>`,
+      state.books.some((b) => b.wb)
+        ? `<li><b>수정본 엑셀</b> — 고를 수 있는 수정 ${state.fixes.length}곳 중 <b>${nf}곳</b>을 고쳐 저장${state.books.some((b) => b.isXls) ? ' (.xls는 .xlsx로 저장됩니다)' : ''}</li>`
+        : '<li><b>수정본 엑셀</b> — PDF·사진에는 수식이 없어 만들 수 없습니다. 원본 엑셀을 올리면 만들어 드립니다.</li>',
+      noFix.length && state.books.some((b) => b.wb) ? `<li class="muted">${noFix.map((b) => esc(b.name)).join(', ')} 은(는) PDF·사진이라 검산·대조만 합니다</li>` : '',
       `<li><b>검토결과 엑셀</b> — 검토 요약 · 발견 사항 ${state.issues.length}건 · 수정 내역 · 항목 내역${state.evidence ? ' · 증빙 대조' : ''}${state.model.months.length > 1 ? ' · 월별 흐름' : ''}${state.fuel ? ' · 유류·장비 대조' : ''}</li>`,
       `<li>오류 ${cnt.error} · 주의 ${cnt.warn} · 참고 ${cnt.info}</li>`,
-    ].join('') : '<li>자금청구서를 올리면 할 수 있는 일이 여기에 표시됩니다.</li>';
-    $('fixBtn').disabled = !ok || !downloads || !nf;
+    ].filter(Boolean).join('') : '<li>자금청구서를 올리면 할 수 있는 일이 여기에 표시됩니다.</li>';
+    $('fixBtn').disabled = !ok || !downloads || !nf || !state.books.some((b) => b.wb);
     $('repBtn').disabled = !ok || !downloads;
     $('exportHelp').textContent = !ok ? '수정본은 원본 파일의 수식만 바꿔 저장합니다. 원본은 그대로 둡니다.'
       : !downloads ? '이 화면에서는 파일 저장을 쓸 수 없습니다.'
+      : !state.books.some((b) => b.wb) ? 'PDF·사진에는 수식이 없어 수정본을 만들 수 없습니다. 원본 엑셀을 올리면 고쳐 드립니다.'
       : !nf ? '고칠 항목을 "점검 결과"에서 하나 이상 선택하면 수정본을 만들 수 있습니다.'
       : `수정본은 원본의 수식만 ${nf}곳 바꿔 저장합니다. 원본 파일은 그대로 둡니다.`;
   }
@@ -3735,7 +3961,8 @@ td.ok{color:var(--ok)}
     $('result').hidden = false;
     $('siteName').textContent = p.site || '자금청구서 점검';
     const months = state.model.months;
-    $('siteMeta').textContent = `${p.period || (p.year ? `${p.year}년 ${p.month}월` : '기간 미상')} · 청구 항목 ${p.rows.length}줄 · 비목 ${p.secs.length}개${months.length > 1 ? ` · ${months.length}개월` : ''}`;
+    $('siteMeta').textContent = `${p.period || (p.year ? `${p.year}년 ${p.month}월` : '기간 미상')} · 청구 항목 ${p.rows.length}줄 · 비목 ${p.secs.length}개${months.length > 1 ? ` · ${months.length}개월` : ''}` +
+      (p.fromGrid ? ` · ${p.fileName.replace(/\.[^.]+$/, '')}에서 읽은 숫자` : '');
     const cnt = { error: 0, warn: 0, info: 0 };
     state.issues.forEach((i) => cnt[i.level]++);
     const secGap = p.grand.total - p.secs.reduce((s, x) => s + x.total, 0);
@@ -3744,9 +3971,11 @@ td.ok{color:var(--ok)}
     const evNo = ev ? ev.rows.filter((r) => r.state === '증빙 없음').length : 0;
     $('tiles').innerHTML = [
       ['청구 합계', `${man(p.grand.total)}원`, `공급가액 ${man(p.grand.supply)} · 부가세 ${man(p.grand.vat)}`],
-      ['비목 합과 차이', Math.abs(secGap) > 0.6 ? `${f0(secGap)}원` : '없음', Math.abs(secGap) > 0.6 ? '총계 수식을 확인하세요' : '총계 = 비목 합'],
+      ['비목 합과 차이', Math.abs(secGap) > 0.6 ? `${f0(secGap)}원` : '없음', Math.abs(secGap) > 0.6 ? (p.fromGrid ? '총계와 비목 합이 다릅니다' : '총계 수식을 확인하세요') : '총계 = 비목 합'],
       ['확인 필요', `${cnt.error + cnt.warn}건`, `<span class="counts"><span class="pill p-bad">오류 ${cnt.error}</span><span class="pill p-warn">주의 ${cnt.warn}</span><span class="pill p-info">참고 ${cnt.info}</span></span>`],
-      ['자동으로 고칠 수 있는 곳', `${state.fixes.length}곳`, `지금 선택 ${activeFixes().length}곳`],
+      p.fromGrid && !state.books.some((b) => b.wb)
+        ? ['자동으로 고칠 수 있는 곳', 'PDF', '숫자로 검산만 합니다 (수식 없음)']
+        : ['자동으로 고칠 수 있는 곳', `${state.fixes.length}곳`, `지금 선택 ${activeFixes().length}곳`],
       ev ? ['증빙 대조', `${ev.rows.length - evNo}/${ev.rows.length}`, `<span class="counts"><span class="pill p-bad">금액 차이 ${evBad}</span><span class="pill p-mute">증빙 없음 ${evNo}</span></span>`]
         : ['증빙 대조', '–', '2단계에서 거래명세서를 올리세요'],
     ].map(([k, b, s]) => `<div class="tile"><span class="k">${k}</span><b>${b}</b><span class="s">${s}</span></div>`).join('');
@@ -3899,22 +4128,55 @@ td.ok{color:var(--ok)}
     await page.render({ canvasContext: ctx, viewport: vp }).promise;
     return new Promise((res) => canvas.toBlob(res, 'image/jpeg', 0.88));
   }
+  // 여러 쪽에 걸친 청구서를 하나로 합침
+  function mergeFundScan(list) {
+    const out = { site: '', period: '', year: null, month: null, total: null, sections: [] };
+    for (const j of list) {
+      if (!j) continue;
+      out.site = out.site || String(j.site || '').trim();
+      out.period = out.period || String(j.period || '').trim();
+      out.year = out.year || j.year || null;
+      out.month = out.month || j.month || null;
+      if (!out.total && j.total && (j.total.supply != null || j.total.total != null)) out.total = j.total;
+      for (const sec of Array.isArray(j.sections) ? j.sections : []) {
+        const key = String(sec.label || '').replace(/\s+/g, '');
+        let cur = out.sections.find((x) => String(x.label || '').replace(/\s+/g, '') === key);
+        if (!cur) { cur = { label: sec.label, supply: null, vat: null, total: null, rows: [] }; out.sections.push(cur); }
+        for (const k of ['supply', 'vat', 'total']) if (cur[k] == null && sec[k] != null) cur[k] = sec[k];
+        cur.rows.push(...(Array.isArray(sec.rows) ? sec.rows : []));
+      }
+    }
+    return out;
+  }
   async function readScans(only) {
     if (!sample || busy) return;
-    const jobs = [];
-    for (const b of state.ev) {
-      const pages = only ? (only === b.name ? (b.parsed.noTablePages || []) : []) : pendingPages(b);
-      for (const p of pages) jobs.push({ b, p });
-    }
+    let jobs;
+    if (only) {
+      const b = state.ev.find((x) => x.name === only);
+      jobs = b ? (b.parsed.noTablePages || []).map((p) => ({ b, p, what: 'ev' })) : [];
+    } else jobs = scanJobs();
     if (!jobs.length) return;
     const ctl = new AbortController();
     busy = { text: '', ctl };
     let done = 0;
+    const fundJson = {};
     try {
-      for (const { b, p } of jobs) {
+      for (const { b, p, what } of jobs) {
         busy.text = `Claude가 읽는 중… ${done + 1}/${jobs.length} (${b.name}${b.kind === 'pdf' ? ` ${p}쪽` : ''})`;
         renderScanBox();
         const img = await pageImage(b, p);
+        if (what === 'fund') {
+          const json = await sample.json(`${F.FUND_SCAN_PROMPT}\n\n파일 이름: ${b.name}${b.kind === 'pdf' ? `, ${p}쪽 (전체 ${b.pdf ? b.pdf.pageCount : 1}쪽)` : ''}`, { images: [img], signal: ctl.signal });
+          (fundJson[b.name] = fundJson[b.name] || []).push(json);
+          const merged = mergeFundScan(fundJson[b.name]);
+          const grid = F.fundGridFromScan(merged, { hint: b.name });
+          const fund = F.readFund(null, null, b.name, { grid, sheetName: '사진 청구서' });
+          if (fund.ok) { b.fund = fund; b.scanned = true; b.scanPages = (b.scanPages || []).filter((x) => x !== p); }
+          done++;
+          busy.text = `${done}/${jobs.length}쪽 읽음`;
+          recompute();
+          continue;
+        }
         const json = await sample.json(`${M.SCAN_PROMPT}\n\n파일 이름: ${b.name}${b.kind === 'pdf' ? `, ${p}쪽` : ''}`, { images: [img], signal: ctl.signal });
         const r = M.linesFromScan(json, { file: b.name, sheet: b.kind === 'pdf' ? `${p}쪽` : '사진', vendorHint: M.cleanVendorHint(b.name) }, {});
         (state.scans[b.name] = state.scans[b.name] || {})[p] = r;
@@ -3925,7 +4187,7 @@ td.ok{color:var(--ok)}
       }
       busy = null;
       recompute();
-      showMsg(`스캔본 ${done}쪽을 읽었습니다. 숫자를 원본과 한 번 대조하세요.`);
+      showMsg(`${done}쪽을 읽었습니다. 숫자를 원본과 한 번 대조하세요.`);
     } catch (e) {
       busy = null;
       recompute();
@@ -3960,6 +4222,7 @@ td.ok{color:var(--ok)}
       const fixes = activeFixes();
       let saved = 0, missed = 0;
       for (const b of state.books) {
+        if (!b.wb) continue;
         const mine = fixes.filter((f) => f.file === b.name);
         if (!mine.length) continue;
         const src = b.isXls ? XLSX.write(b.wb, { bookType: 'xlsx', type: 'array', cellStyles: true }) : b.data;
